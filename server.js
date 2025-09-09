@@ -5,28 +5,27 @@ const fs = require('fs');
 const path = require('path');
 
 const app = express();
-// Add at the top after other requires
-const path = require('path');
 
-// Update CORS configuration
+// CORS configuration - updated for production
 app.use(cors({
-  origin: process.env.FRONTEND_URL || 'http://localhost:3000',
-  credentials: true
+  origin: process.env.FRONTEND_URL || ['http://localhost:3000', 'http://localhost:8080', 'http://127.0.0.1:5500'],
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization']
 }));
 
-// Serve static files in production
-if (process.env.NODE_ENV === 'production') {
-  app.use(express.static(path.join(__dirname, 'public')));
-  
-  // Handle React routing, return all requests to the app
-  app.get('*', (req, res) => {
-    res.sendFile(path.join(__dirname, 'public', 'index.html'));
-  });
-}
+// Middleware
+app.use(express.json({ limit: '10mb' }));
+app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
 // Create uploads directories if they don't exist
-const uploadsDir = './uploads';
-const dirs = ['./uploads/articles', './uploads/products', './uploads/posts', './uploads/avatars'];
+const uploadsDir = process.env.NODE_ENV === 'production' ? '/tmp/uploads' : './uploads';
+const dirs = [
+  `${uploadsDir}/articles`, 
+  `${uploadsDir}/products`, 
+  `${uploadsDir}/posts`, 
+  `${uploadsDir}/avatars`
+];
 
 dirs.forEach(dir => {
   if (!fs.existsSync(dir)) {
@@ -35,14 +34,13 @@ dirs.forEach(dir => {
   }
 });
 
-
-// Middleware
-app.use(cors());
-app.use(express.json({ limit: '10mb' }));
-app.use(express.urlencoded({ extended: true, limit: '10mb' }));
-
 // Serve static files from uploads directory
-app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
+app.use('/uploads', express.static(uploadsDir));
+
+// Serve static files in production (for frontend)
+if (process.env.NODE_ENV === 'production') {
+  app.use(express.static(path.join(__dirname, 'public')));
+}
 
 // Health check
 app.get('/health', (req, res) => {
@@ -50,13 +48,18 @@ app.get('/health', (req, res) => {
     status: 'OK', 
     message: 'Server is running',
     timestamp: new Date().toISOString(),
+    environment: process.env.NODE_ENV || 'development',
     dbStatus: mongoose.connection.readyState === 1 ? 'Connected' : 'Disconnected'
   });
 });
 
 // Test route
 app.get('/api/test', (req, res) => {
-  res.json({ message: 'API is working', routes: 'loaded' });
+  res.json({ 
+    message: 'API is working', 
+    routes: 'loaded',
+    environment: process.env.NODE_ENV || 'development'
+  });
 });
 
 // Global flag to track if routes are loaded
@@ -178,8 +181,7 @@ function setupFallbackRoutes() {
 // MongoDB Atlas connection
 async function connectToAtlas() {
   try {
-    // You need to replace YOUR_PASSWORD with your actual database password
-    const MONGODB_URI = 'mongodb+srv://mamanalgerienne:anesaya75@cluster0.iqodm96.mongodb.net/mama-algerienne?retryWrites=true&w=majority&appName=Cluster0';
+    const MONGODB_URI = process.env.MONGODB_URI || 'mongodb+srv://mamanalgerienne:anesaya75@cluster0.iqodm96.mongodb.net/mama-algerienne?retryWrites=true&w=majority&appName=Cluster0';
     
     console.log('Connecting to MongoDB Atlas...');
     
@@ -201,8 +203,7 @@ async function connectToAtlas() {
     console.error('❌ MongoDB Atlas connection failed:', error.message);
     
     if (error.message.includes('authentication failed')) {
-      console.log('🔑 Please check your database password in the connection string');
-      console.log('🔑 Make sure to replace YOUR_PASSWORD with your actual password');
+      console.log('🔒 Please check your database password in the connection string');
     }
     
     return false;
@@ -246,6 +247,7 @@ async function createAdminUser() {
 // Initialize server
 async function startServer() {
   console.log('🚀 Starting server...');
+  console.log('Environment:', process.env.NODE_ENV || 'development');
   
   // Try to connect to MongoDB Atlas
   const dbConnected = await connectToAtlas();
@@ -254,18 +256,37 @@ async function startServer() {
     // Use fallback routes if database connection fails
     setupFallbackRoutes();
   }
+
+  // Handle React routing in production, return all requests to the app
+  if (process.env.NODE_ENV === 'production') {
+    app.get('*', (req, res) => {
+      // Only serve index.html for non-API routes
+      if (!req.path.startsWith('/api') && !req.path.startsWith('/uploads')) {
+        res.sendFile(path.join(__dirname, 'public', 'index.html'));
+      } else {
+        res.status(404).json({ 
+          message: 'Route not found', 
+          path: req.originalUrl,
+          method: req.method
+        });
+      }
+    });
+  }
   
   // Error handling middleware
   app.use((err, req, res, next) => {
     console.error('Server error:', err.message);
-    res.status(500).json({ message: 'Server error', error: err.message });
+    res.status(500).json({ 
+      message: 'Server error', 
+      error: process.env.NODE_ENV === 'production' ? 'Internal server error' : err.message 
+    });
   });
 
-  // 404 handler - MUST be LAST
-  app.use('*', (req, res) => {
-    console.log(`404 - Route not found: ${req.method} ${req.originalUrl}`);
+  // 404 handler for API routes
+  app.use('/api/*', (req, res) => {
+    console.log(`404 - API Route not found: ${req.method} ${req.originalUrl}`);
     res.status(404).json({ 
-      message: 'Route not found', 
+      message: 'API route not found', 
       path: req.originalUrl,
       method: req.method
     });
@@ -273,7 +294,7 @@ async function startServer() {
 
   // Start server
   const PORT = process.env.PORT || 5000;
-  app.listen(PORT, () => {
+  app.listen(PORT, '0.0.0.0', () => {
     console.log(`\n🚀 Server running on port ${PORT}`);
     console.log(`📊 Health check: http://localhost:${PORT}/health`);
     console.log(`🧪 API Test: http://localhost:${PORT}/api/test`);
@@ -288,9 +309,7 @@ async function startServer() {
       console.log('✅ Server ready with MongoDB Atlas');
     } else {
       console.log('⚠️ Server running in fallback mode');
-      console.log('📝 To fix: Replace YOUR_PASSWORD in the MongoDB URI with your actual password');
-      console.log('📝 The connection string should look like:');
-      console.log('   mongodb+srv://mamanalgerienne:anesaya75@cluster0.iqodm96.mongodb.net/...');
+      console.log('💡 Database connection failed - using fallback routes');
     }
   });
 }
