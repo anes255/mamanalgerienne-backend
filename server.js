@@ -193,7 +193,7 @@ if (process.env.NODE_ENV === 'production') {
   });
 }
 
-// Health check with mobile info
+// Health check with mobile info and debugging
 app.get('/health', (req, res) => {
   res.json({ 
     status: 'OK', 
@@ -204,7 +204,22 @@ app.get('/health', (req, res) => {
     userAgent: req.headers['user-agent'],
     isMobile: req.isMobile,
     compression: !!compression,
-    helmet: !!helmet
+    helmet: !!helmet,
+    ip: req.headers['x-forwarded-for'] || req.connection.remoteAddress,
+    origin: req.headers.origin || 'no-origin'
+  });
+});
+
+// Mobile debug endpoint
+app.get('/api/mobile-debug', (req, res) => {
+  res.json({
+    mobile: req.isMobile,
+    userAgent: req.headers['user-agent'],
+    headers: req.headers,
+    ip: req.headers['x-forwarded-for'] || req.connection.remoteAddress,
+    method: req.method,
+    path: req.path,
+    timestamp: new Date().toISOString()
   });
 });
 
