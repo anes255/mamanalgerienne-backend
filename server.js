@@ -3,10 +3,24 @@ const mongoose = require('mongoose');
 const cors = require('cors');
 const fs = require('fs');
 const path = require('path');
-const compression = require('compression');
-const helmet = require('helmet');
 
 const app = express();
+
+// Try to load optional dependencies
+let compression, helmet;
+try {
+  compression = require('compression');
+  console.log('✅ Compression middleware loaded');
+} catch (e) {
+  console.log('⚠️ Compression not available, skipping...');
+}
+
+try {
+  helmet = require('helmet');
+  console.log('✅ Helmet security middleware loaded');
+} catch (e) {
+  console.log('⚠️ Helmet not available, skipping...');
+}
 
 // Create uploads directories if they don't exist
 const uploadsDir = './uploads';
@@ -20,34 +34,46 @@ dirs.forEach(dir => {
 });
 
 // Mobile-optimized middleware configuration
-// 1. Security headers with mobile support
-app.use(helmet({
-  contentSecurityPolicy: {
-    directives: {
-      defaultSrc: ["'self'"],
-      styleSrc: ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com", "https://cdnjs.cloudflare.com"],
-      fontSrc: ["'self'", "https://fonts.gstatic.com", "https://cdnjs.cloudflare.com"],
-      scriptSrc: ["'self'", "'unsafe-inline'", "https://cdnjs.cloudflare.com"],
-      imgSrc: ["'self'", "data:", "https:", "http:"],
-      connectSrc: ["'self'", "http://localhost:5000", "https:"],
-      mediaSrc: ["'self'", "data:", "https:", "http:"],
+// 1. Security headers with mobile support (if helmet is available)
+if (helmet) {
+  app.use(helmet({
+    contentSecurityPolicy: {
+      directives: {
+        defaultSrc: ["'self'"],
+        styleSrc: ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com", "https://cdnjs.cloudflare.com"],
+        fontSrc: ["'self'", "https://fonts.gstatic.com", "https://cdnjs.cloudflare.com"],
+        scriptSrc: ["'self'", "'unsafe-inline'", "https://cdnjs.cloudflare.com"],
+        imgSrc: ["'self'", "data:", "https:", "http:"],
+        connectSrc: ["'self'", "http://localhost:5000", "https:"],
+        mediaSrc: ["'self'", "data:", "https:", "http:"],
+      },
     },
-  },
-  crossOriginEmbedderPolicy: false,
-  crossOriginResourcePolicy: { policy: "cross-origin" }
-}));
+    crossOriginEmbedderPolicy: false,
+    crossOriginResourcePolicy: { policy: "cross-origin" }
+  }));
+} else {
+  // Basic security headers without helmet
+  app.use((req, res, next) => {
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    res.setHeader('X-Frame-Options', 'DENY');
+    res.setHeader('X-XSS-Protection', '1; mode=block');
+    next();
+  });
+}
 
-// 2. Compression for better mobile performance
-app.use(compression({
-  filter: (req, res) => {
-    if (req.headers['x-no-compression']) {
-      return false;
-    }
-    return compression.filter(req, res);
-  },
-  level: 6,
-  threshold: 1024,
-}));
+// 2. Compression for better mobile performance (if available)
+if (compression) {
+  app.use(compression({
+    filter: (req, res) => {
+      if (req.headers['x-no-compression']) {
+        return false;
+      }
+      return compression.filter(req, res);
+    },
+    level: 6,
+    threshold: 1024,
+  }));
+}
 
 // 3. Mobile-friendly CORS configuration
 app.use(cors({
@@ -176,7 +202,9 @@ app.get('/health', (req, res) => {
     dbStatus: mongoose.connection.readyState === 1 ? 'Connected' : 'Disconnected',
     mobileOptimized: true,
     userAgent: req.headers['user-agent'],
-    isMobile: req.isMobile
+    isMobile: req.isMobile,
+    compression: !!compression,
+    helmet: !!helmet
   });
 });
 
@@ -186,7 +214,7 @@ app.get('/api/test', (req, res) => {
     message: 'API is working', 
     routes: 'loaded',
     mobileDetected: req.isMobile,
-    compressionEnabled: true,
+    compressionEnabled: !!compression,
     timestamp: new Date().toISOString()
   });
 });
@@ -429,12 +457,12 @@ async function startServer() {
     console.log(`\n📧 Admin login credentials:`);
     console.log(`   Email: mamanalgeriennepartenariat@gmail.com`);
     console.log(`   Password: anesaya75`);
-    console.log(`\n📱 Mobile Optimizations Enabled:`);
-    console.log(`   ✓ Compression for faster loading`);
+    console.log(`\n📱 Mobile Optimizations:`);
+    console.log(`   ${compression ? '✓' : '⚠️'} Compression ${compression ? 'enabled' : 'not available'}`);
+    console.log(`   ${helmet ? '✓' : '⚠️'} Security headers ${helmet ? 'enabled' : 'basic only'}`);
     console.log(`   ✓ Mobile device detection`);
     console.log(`   ✓ Optimized cache headers`);
     console.log(`   ✓ CORS for mobile browsers`);
-    console.log(`   ✓ Enhanced security headers`);
     console.log(`   ✓ Large file upload support`);
     
     if (dbConnected) {
