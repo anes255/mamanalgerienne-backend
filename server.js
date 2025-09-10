@@ -1,9 +1,10 @@
+require('dotenv').config(); // Load environment variables
+
 const express = require('express');
 const mongoose = require('mongoose');
 const cors = require('cors');
 const fs = require('fs');
 const path = require('path');
-const os = require('os');
 
 const app = express();
 
@@ -18,58 +19,49 @@ dirs.forEach(dir => {
   }
 });
 
-// Updated CORS configuration for mobile access
+// CORS Configuration
 const corsOptions = {
   origin: function (origin, callback) {
-    // Allow requests with no origin (like mobile apps or Postman)
+    // Allow requests with no origin (like mobile apps or curl requests)
     if (!origin) return callback(null, true);
     
-    // Allow localhost and 127.0.0.1 on any port
-    if (origin.match(/^https?:\/\/(localhost|127\.0\.0\.1|192\.168\.\d+\.\d+)(:\d+)?$/)) {
-      return callback(null, true);
-    }
-    
-    // Allow your production URLs
+    // Allow your frontend URL and localhost for development
     const allowedOrigins = [
-      'https://your-frontend-domain.com', // Replace with your actual domain
-      'https://maman-algerienne.onrender.com',
-      process.env.FRONTEND_URL
-    ].filter(Boolean);
+      process.env.FRONTEND_URL || 'https://maman-algerienne.onrender.com',
+      'http://localhost:3000',
+      'http://127.0.0.1:3000',
+      'https://maman-algerienne.onrender.com'
+    ];
     
-    if (allowedOrigins.includes(origin)) {
-      return callback(null, true);
+    if (allowedOrigins.indexOf(origin) !== -1) {
+      callback(null, true);
+    } else {
+      console.log('Blocked by CORS:', origin);
+      callback(new Error('Not allowed by CORS'));
     }
-    
-    // For development, allow any origin that includes your local IP
-    if (process.env.NODE_ENV !== 'production') {
-      return callback(null, true);
-    }
-    
-    callback(new Error('Not allowed by CORS'));
   },
   credentials: true,
-  optionsSuccessStatus: 200,
-  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With']
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization']
 };
 
-// Middleware
 app.use(cors(corsOptions));
-app.options('*', cors(corsOptions)); // Handle preflight requests
-app.use(express.json({ limit: '10mb' }));
-app.use(express.urlencoded({ extended: true, limit: '10mb' }));
+
+// Middleware
+app.use(express.json({ limit: process.env.MAX_FILE_SIZE || '10mb' }));
+app.use(express.urlencoded({ extended: true, limit: process.env.MAX_FILE_SIZE || '10mb' }));
 
 // Serve static files from uploads directory
-app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
+app.use('/uploads', express.static(path.join(__dirname, process.env.UPLOAD_PATH || './uploads')));
 
 // Serve static files in production
 if (process.env.NODE_ENV === 'production') {
   app.use(express.static(path.join(__dirname, 'public')));
   
-  // Handle React routing, return all requests to the app
-  app.get('*', (req, res) => {
-    res.sendFile(path.join(__dirname, 'public', 'index.html'));
-  });
+  // Handle React routing, return all requests to the app (if you had a React frontend)
+  // app.get('*', (req, res) => {
+  //   res.sendFile(path.join(__dirname, 'public', 'index.html'));
+  // });
 }
 
 // Health check
@@ -78,13 +70,19 @@ app.get('/health', (req, res) => {
     status: 'OK', 
     message: 'Server is running',
     timestamp: new Date().toISOString(),
-    dbStatus: mongoose.connection.readyState === 1 ? 'Connected' : 'Disconnected'
+    dbStatus: mongoose.connection.readyState === 1 ? 'Connected' : 'Disconnected',
+    environment: process.env.NODE_ENV || 'development'
   });
 });
 
 // Test route
 app.get('/api/test', (req, res) => {
-  res.json({ message: 'API is working', routes: 'loaded' });
+  res.json({ 
+    message: 'API is working', 
+    routes: 'loaded',
+    environment: process.env.NODE_ENV || 'development',
+    frontendUrl: process.env.FRONTEND_URL || 'not set'
+  });
 });
 
 // Global flag to track if routes are loaded
@@ -206,8 +204,7 @@ function setupFallbackRoutes() {
 // MongoDB Atlas connection
 async function connectToAtlas() {
   try {
-    // You need to replace YOUR_PASSWORD with your actual database password
-    const MONGODB_URI = 'mongodb+srv://mamanalgerienne:anesaya75@cluster0.iqodm96.mongodb.net/mama-algerienne?retryWrites=true&w=majority&appName=Cluster0';
+    const MONGODB_URI = process.env.MONGODB_URI || 'mongodb+srv://mamanalgerienne:anesaya75@cluster0.iqodm96.mongodb.net/mama-algerienne?retryWrites=true&w=majority&appName=Cluster0';
     
     console.log('Connecting to MongoDB Atlas...');
     
@@ -271,38 +268,11 @@ async function createAdminUser() {
   }
 }
 
-// Get local IP address for mobile testing
-function getLocalIP() {
-  const networkInterfaces = os.networkInterfaces();
-  
-  // Try different interface names
-  const possibleInterfaces = ['Wi-Fi', 'en0', 'wlan0', 'eth0', 'Ethernet'];
-  
-  for (const interfaceName of possibleInterfaces) {
-    const networkInterface = networkInterfaces[interfaceName];
-    if (networkInterface) {
-      const ipv4 = networkInterface.find(addr => addr.family === 'IPv4' && !addr.internal);
-      if (ipv4) {
-        return ipv4.address;
-      }
-    }
-  }
-  
-  // Fallback: find any non-internal IPv4 address
-  for (const interfaceName in networkInterfaces) {
-    const networkInterface = networkInterfaces[interfaceName];
-    const ipv4 = networkInterface.find(addr => addr.family === 'IPv4' && !addr.internal);
-    if (ipv4) {
-      return ipv4.address;
-    }
-  }
-  
-  return 'localhost';
-}
-
 // Initialize server
 async function startServer() {
   console.log('🚀 Starting server...');
+  console.log('Environment:', process.env.NODE_ENV || 'development');
+  console.log('Frontend URL:', process.env.FRONTEND_URL || 'not set');
   
   // Try to connect to MongoDB Atlas
   const dbConnected = await connectToAtlas();
@@ -328,29 +298,15 @@ async function startServer() {
     });
   });
 
-  // Start server with network interface binding for mobile access
+  // Start server
   const PORT = process.env.PORT || 5000;
-  const HOST = process.env.HOST || '0.0.0.0'; // This allows external connections
-  const localIP = getLocalIP();
-
-  app.listen(PORT, HOST, () => {
-    console.log(`\n🚀 Server running on ${HOST}:${PORT}`);
+  app.listen(PORT, () => {
+    console.log(`\n🚀 Server running on port ${PORT}`);
     console.log(`📊 Health check: http://localhost:${PORT}/health`);
     console.log(`🧪 API Test: http://localhost:${PORT}/api/test`);
     console.log(`📰 Articles: http://localhost:${PORT}/api/articles`);
     console.log(`🛍️ Products: http://localhost:${PORT}/api/products`);
     console.log(`📢 Posts: http://localhost:${PORT}/api/posts`);
-    
-    // Show IP addresses for mobile testing
-    if (localIP !== 'localhost') {
-      console.log(`\n📱 MOBILE ACCESS URLS:`);
-      console.log(`   Server: http://${localIP}:${PORT}`);
-      console.log(`   Health: http://${localIP}:${PORT}/health`);
-      console.log(`   API: http://${localIP}:${PORT}/api/test`);
-      console.log(`\n💡 UPDATE YOUR FRONTEND LOCAL_IP TO: ${localIP}`);
-      console.log(`   Replace 192.168.1.100 with ${localIP} in your frontend files`);
-    }
-    
     console.log(`\n🔧 Admin login credentials:`);
     console.log(`   Email: mamanalgeriennepartenariat@gmail.com`);
     console.log(`   Password: anesaya75\n`);
@@ -359,16 +315,8 @@ async function startServer() {
       console.log('✅ Server ready with MongoDB Atlas');
     } else {
       console.log('⚠️ Server running in fallback mode');
-      console.log('🔍 To fix: Replace YOUR_PASSWORD in the MongoDB URI with your actual password');
-      console.log('🔍 The connection string should look like:');
-      console.log('   mongodb+srv://mamanalgerienne:anesaya75@cluster0.iqodm96.mongodb.net/...');
+      console.log('🔍 To fix: Check MongoDB Atlas connection string and credentials');
     }
-    
-    console.log(`\n📋 MOBILE SETUP INSTRUCTIONS:`);
-    console.log(`1. Make sure your mobile device is on the same WiFi network`);
-    console.log(`2. Update LOCAL_IP in your frontend files to: ${localIP}`);
-    console.log(`3. Access your frontend using: http://${localIP}:3000 (or your frontend port)`);
-    console.log(`4. The mobile device will now connect to: http://${localIP}:${PORT}/api`);
   });
 }
 
