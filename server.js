@@ -3,24 +3,9 @@ const mongoose = require('mongoose');
 const cors = require('cors');
 const fs = require('fs');
 const path = require('path');
+const os = require('os');
 
 const app = express();
-
-// Try to load optional dependencies
-let compression, helmet;
-try {
-  compression = require('compression');
-  console.log('✅ Compression middleware loaded');
-} catch (e) {
-  console.log('⚠️ Compression not available, skipping...');
-}
-
-try {
-  helmet = require('helmet');
-  console.log('✅ Helmet security middleware loaded');
-} catch (e) {
-  console.log('⚠️ Helmet not available, skipping...');
-}
 
 // Create uploads directories if they don't exist
 const uploadsDir = './uploads';
@@ -33,205 +18,73 @@ dirs.forEach(dir => {
   }
 });
 
-// Mobile-optimized middleware configuration
-// 1. Security headers with mobile support (if helmet is available)
-if (helmet) {
-  app.use(helmet({
-    contentSecurityPolicy: {
-      directives: {
-        defaultSrc: ["'self'"],
-        styleSrc: ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com", "https://cdnjs.cloudflare.com"],
-        fontSrc: ["'self'", "https://fonts.gstatic.com", "https://cdnjs.cloudflare.com"],
-        scriptSrc: ["'self'", "'unsafe-inline'", "https://cdnjs.cloudflare.com"],
-        imgSrc: ["'self'", "data:", "https:", "http:"],
-        connectSrc: ["'self'", "http://localhost:5000", "https:"],
-        mediaSrc: ["'self'", "data:", "https:", "http:"],
-      },
-    },
-    crossOriginEmbedderPolicy: false,
-    crossOriginResourcePolicy: { policy: "cross-origin" }
-  }));
-} else {
-  // Basic security headers without helmet
-  app.use((req, res, next) => {
-    res.setHeader('X-Content-Type-Options', 'nosniff');
-    res.setHeader('X-Frame-Options', 'DENY');
-    res.setHeader('X-XSS-Protection', '1; mode=block');
-    next();
-  });
-}
-
-// 2. Compression for better mobile performance (if available)
-if (compression) {
-  app.use(compression({
-    filter: (req, res) => {
-      if (req.headers['x-no-compression']) {
-        return false;
-      }
-      return compression.filter(req, res);
-    },
-    level: 6,
-    threshold: 1024,
-  }));
-}
-
-// 3. Mobile-friendly CORS configuration
-app.use(cors({
-  origin: function(origin, callback) {
-    // Allow requests with no origin (mobile apps, curl, etc.)
+// Updated CORS configuration for mobile access
+const corsOptions = {
+  origin: function (origin, callback) {
+    // Allow requests with no origin (like mobile apps or Postman)
     if (!origin) return callback(null, true);
     
+    // Allow localhost and 127.0.0.1 on any port
+    if (origin.match(/^https?:\/\/(localhost|127\.0\.0\.1|192\.168\.\d+\.\d+)(:\d+)?$/)) {
+      return callback(null, true);
+    }
+    
+    // Allow your production URLs
     const allowedOrigins = [
-      'http://localhost:3000',
-      'http://localhost:8080',
-      'http://127.0.0.1:3000',
-      'http://127.0.0.1:8080',
+      'https://your-frontend-domain.com', // Replace with your actual domain
+      'https://maman-algerienne.onrender.com',
       process.env.FRONTEND_URL
     ].filter(Boolean);
     
-    if (allowedOrigins.indexOf(origin) !== -1) {
-      callback(null, true);
-    } else {
-      // Allow mobile development and file:// protocol
-      if (origin.startsWith('file://') || 
-          origin.includes('localhost') || 
-          origin.includes('127.0.0.1') ||
-          origin.includes('192.168.') ||
-          origin.includes('10.0.')) {
-        callback(null, true);
-      } else {
-        callback(null, true); // For now, allow all origins for mobile compatibility
-      }
-    }
-  },
-  credentials: true,
-  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Accept', 'Origin'],
-  exposedHeaders: ['Content-Length', 'X-Foo', 'X-Bar']
-}));
-
-// 4. Enhanced body parsing for mobile uploads
-app.use(express.json({ 
-  limit: '50mb',
-  verify: (req, res, buf) => {
-    req.rawBody = buf;
-  }
-}));
-app.use(express.urlencoded({ 
-  extended: true, 
-  limit: '50mb',
-  parameterLimit: 50000
-}));
-
-// 5. Mobile-optimized static file serving
-app.use('/uploads', express.static(path.join(__dirname, 'uploads'), {
-  maxAge: '1d',
-  etag: true,
-  lastModified: true,
-  setHeaders: (res, path) => {
-    // Set proper MIME types for mobile compatibility
-    if (path.endsWith('.jpg') || path.endsWith('.jpeg')) {
-      res.setHeader('Content-Type', 'image/jpeg');
-    } else if (path.endsWith('.png')) {
-      res.setHeader('Content-Type', 'image/png');
-    } else if (path.endsWith('.webp')) {
-      res.setHeader('Content-Type', 'image/webp');
+    if (allowedOrigins.includes(origin)) {
+      return callback(null, true);
     }
     
-    // Mobile-friendly cache headers
-    res.setHeader('Cache-Control', 'public, max-age=86400');
-    res.setHeader('Vary', 'Accept-Encoding');
-  }
-}));
-
-// 6. Mobile device detection middleware
-app.use((req, res, next) => {
-  const userAgent = req.headers['user-agent'] || '';
-  
-  // Detect mobile devices
-  const mobileKeywords = [
-    'Mobile', 'Android', 'iPhone', 'iPad', 'iPod', 'BlackBerry', 
-    'Windows Phone', 'Opera Mini', 'IEMobile', 'Mobile Safari'
-  ];
-  
-  req.isMobile = mobileKeywords.some(keyword => 
-    userAgent.includes(keyword)
-  );
-  
-  // Add mobile-specific headers
-  if (req.isMobile) {
-    res.setHeader('X-UA-Compatible', 'IE=edge');
-    res.setHeader('X-Mobile-Detected', 'true');
-  }
-  
-  next();
-});
-
-// 7. Serve static files in production with mobile optimization
-if (process.env.NODE_ENV === 'production') {
-  app.use(express.static(path.join(__dirname, 'public'), {
-    maxAge: '1d',
-    etag: true,
-    lastModified: true,
-    setHeaders: (res, path) => {
-      if (path.endsWith('.html')) {
-        res.setHeader('Cache-Control', 'no-cache');
-      } else if (path.endsWith('.js') || path.endsWith('.css')) {
-        res.setHeader('Cache-Control', 'public, max-age=31536000');
-      }
+    // For development, allow any origin that includes your local IP
+    if (process.env.NODE_ENV !== 'production') {
+      return callback(null, true);
     }
-  }));
+    
+    callback(new Error('Not allowed by CORS'));
+  },
+  credentials: true,
+  optionsSuccessStatus: 200,
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With']
+};
+
+// Middleware
+app.use(cors(corsOptions));
+app.options('*', cors(corsOptions)); // Handle preflight requests
+app.use(express.json({ limit: '10mb' }));
+app.use(express.urlencoded({ extended: true, limit: '10mb' }));
+
+// Serve static files from uploads directory
+app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
+
+// Serve static files in production
+if (process.env.NODE_ENV === 'production') {
+  app.use(express.static(path.join(__dirname, 'public')));
   
-  // Handle React routing for mobile browsers
+  // Handle React routing, return all requests to the app
   app.get('*', (req, res) => {
-    res.sendFile(path.join(__dirname, 'public', 'index.html'), (err) => {
-      if (err) {
-        console.error('Error serving index.html:', err);
-        res.status(500).send('Server Error');
-      }
-    });
+    res.sendFile(path.join(__dirname, 'public', 'index.html'));
   });
 }
 
-// Health check with mobile info and debugging
+// Health check
 app.get('/health', (req, res) => {
   res.json({ 
     status: 'OK', 
     message: 'Server is running',
     timestamp: new Date().toISOString(),
-    dbStatus: mongoose.connection.readyState === 1 ? 'Connected' : 'Disconnected',
-    mobileOptimized: true,
-    userAgent: req.headers['user-agent'],
-    isMobile: req.isMobile,
-    compression: !!compression,
-    helmet: !!helmet,
-    ip: req.headers['x-forwarded-for'] || req.connection.remoteAddress,
-    origin: req.headers.origin || 'no-origin'
+    dbStatus: mongoose.connection.readyState === 1 ? 'Connected' : 'Disconnected'
   });
 });
 
-// Mobile debug endpoint
-app.get('/api/mobile-debug', (req, res) => {
-  res.json({
-    mobile: req.isMobile,
-    userAgent: req.headers['user-agent'],
-    headers: req.headers,
-    ip: req.headers['x-forwarded-for'] || req.connection.remoteAddress,
-    method: req.method,
-    path: req.path,
-    timestamp: new Date().toISOString()
-  });
-});
-
-// Test route with mobile detection
+// Test route
 app.get('/api/test', (req, res) => {
-  res.json({ 
-    message: 'API is working', 
-    routes: 'loaded',
-    mobileDetected: req.isMobile,
-    compressionEnabled: !!compression,
-    timestamp: new Date().toISOString()
-  });
+  res.json({ message: 'API is working', routes: 'loaded' });
 });
 
 // Global flag to track if routes are loaded
@@ -309,7 +162,7 @@ function setupFallbackRoutes() {
     }
   });
   
-  // Empty data routes with mobile-friendly responses
+  // Empty data routes
   const emptyRoutes = [
     '/api/articles',
     '/api/products', 
@@ -324,8 +177,7 @@ function setupFallbackRoutes() {
         products: [],
         posts: [],
         comments: [],
-        pagination: { current: 1, pages: 0, total: 0 },
-        mobile: req.isMobile
+        pagination: { current: 1, pages: 0, total: 0 }
       });
     });
     
@@ -344,8 +196,7 @@ function setupFallbackRoutes() {
   app.get('/api/admin/dashboard', (req, res) => {
     res.json({
       counts: { articles: 0, products: 0, posts: 0, users: 1, comments: 0 },
-      stats: { todayViews: 0, pendingComments: 0, newUsersThisWeek: 0, popularCategory: 'عام' },
-      mobile: req.isMobile
+      stats: { todayViews: 0, pendingComments: 0, newUsersThisWeek: 0, popularCategory: 'عام' }
     });
   });
   
@@ -355,6 +206,7 @@ function setupFallbackRoutes() {
 // MongoDB Atlas connection
 async function connectToAtlas() {
   try {
+    // You need to replace YOUR_PASSWORD with your actual database password
     const MONGODB_URI = 'mongodb+srv://mamanalgerienne:anesaya75@cluster0.iqodm96.mongodb.net/mama-algerienne?retryWrites=true&w=majority&appName=Cluster0';
     
     console.log('Connecting to MongoDB Atlas...');
@@ -377,8 +229,8 @@ async function connectToAtlas() {
     console.error('❌ MongoDB Atlas connection failed:', error.message);
     
     if (error.message.includes('authentication failed')) {
-      console.log('🔑 Please check your database password in the connection string');
-      console.log('🔑 Make sure to replace YOUR_PASSWORD with your actual password');
+      console.log('🔐 Please check your database password in the connection string');
+      console.log('🔐 Make sure to replace YOUR_PASSWORD with your actual password');
     }
     
     return false;
@@ -419,24 +271,38 @@ async function createAdminUser() {
   }
 }
 
-// Enhanced error handling for mobile
-app.use((err, req, res, next) => {
-  console.error('Server error:', err.message);
+// Get local IP address for mobile testing
+function getLocalIP() {
+  const networkInterfaces = os.networkInterfaces();
   
-  // Mobile-friendly error response
-  const errorResponse = {
-    message: 'Server error',
-    error: process.env.NODE_ENV === 'development' ? err.message : 'Internal server error',
-    mobile: req.isMobile,
-    timestamp: new Date().toISOString()
-  };
+  // Try different interface names
+  const possibleInterfaces = ['Wi-Fi', 'en0', 'wlan0', 'eth0', 'Ethernet'];
   
-  res.status(500).json(errorResponse);
-});
+  for (const interfaceName of possibleInterfaces) {
+    const networkInterface = networkInterfaces[interfaceName];
+    if (networkInterface) {
+      const ipv4 = networkInterface.find(addr => addr.family === 'IPv4' && !addr.internal);
+      if (ipv4) {
+        return ipv4.address;
+      }
+    }
+  }
+  
+  // Fallback: find any non-internal IPv4 address
+  for (const interfaceName in networkInterfaces) {
+    const networkInterface = networkInterfaces[interfaceName];
+    const ipv4 = networkInterface.find(addr => addr.family === 'IPv4' && !addr.internal);
+    if (ipv4) {
+      return ipv4.address;
+    }
+  }
+  
+  return 'localhost';
+}
 
 // Initialize server
 async function startServer() {
-  console.log('🚀 Starting mobile-optimized server...');
+  console.log('🚀 Starting server...');
   
   // Try to connect to MongoDB Atlas
   const dbConnected = await connectToAtlas();
@@ -445,6 +311,12 @@ async function startServer() {
     // Use fallback routes if database connection fails
     setupFallbackRoutes();
   }
+  
+  // Error handling middleware
+  app.use((err, req, res, next) => {
+    console.error('Server error:', err.message);
+    res.status(500).json({ message: 'Server error', error: err.message });
+  });
 
   // 404 handler - MUST be LAST
   app.use('*', (req, res) => {
@@ -452,42 +324,51 @@ async function startServer() {
     res.status(404).json({ 
       message: 'Route not found', 
       path: req.originalUrl,
-      method: req.method,
-      mobile: req.isMobile
+      method: req.method
     });
   });
 
-  // Start server
+  // Start server with network interface binding for mobile access
   const PORT = process.env.PORT || 5000;
-  app.listen(PORT, '0.0.0.0', () => {
-    console.log(`\n🚀 Mobile-optimized server running on port ${PORT}`);
-    console.log(`📱 Accessible from mobile devices on your network`);
-    console.log(`🔗 Local: http://localhost:${PORT}`);
-    console.log(`🔗 Network: http://0.0.0.0:${PORT}`);
+  const HOST = process.env.HOST || '0.0.0.0'; // This allows external connections
+  const localIP = getLocalIP();
+
+  app.listen(PORT, HOST, () => {
+    console.log(`\n🚀 Server running on ${HOST}:${PORT}`);
     console.log(`📊 Health check: http://localhost:${PORT}/health`);
     console.log(`🧪 API Test: http://localhost:${PORT}/api/test`);
     console.log(`📰 Articles: http://localhost:${PORT}/api/articles`);
     console.log(`🛍️ Products: http://localhost:${PORT}/api/products`);
     console.log(`📢 Posts: http://localhost:${PORT}/api/posts`);
-    console.log(`\n📧 Admin login credentials:`);
+    
+    // Show IP addresses for mobile testing
+    if (localIP !== 'localhost') {
+      console.log(`\n📱 MOBILE ACCESS URLS:`);
+      console.log(`   Server: http://${localIP}:${PORT}`);
+      console.log(`   Health: http://${localIP}:${PORT}/health`);
+      console.log(`   API: http://${localIP}:${PORT}/api/test`);
+      console.log(`\n💡 UPDATE YOUR FRONTEND LOCAL_IP TO: ${localIP}`);
+      console.log(`   Replace 192.168.1.100 with ${localIP} in your frontend files`);
+    }
+    
+    console.log(`\n🔧 Admin login credentials:`);
     console.log(`   Email: mamanalgeriennepartenariat@gmail.com`);
-    console.log(`   Password: anesaya75`);
-    console.log(`\n📱 Mobile Optimizations:`);
-    console.log(`   ${compression ? '✓' : '⚠️'} Compression ${compression ? 'enabled' : 'not available'}`);
-    console.log(`   ${helmet ? '✓' : '⚠️'} Security headers ${helmet ? 'enabled' : 'basic only'}`);
-    console.log(`   ✓ Mobile device detection`);
-    console.log(`   ✓ Optimized cache headers`);
-    console.log(`   ✓ CORS for mobile browsers`);
-    console.log(`   ✓ Large file upload support`);
+    console.log(`   Password: anesaya75\n`);
     
     if (dbConnected) {
-      console.log('\n✅ Server ready with MongoDB Atlas');
+      console.log('✅ Server ready with MongoDB Atlas');
     } else {
-      console.log('\n⚠️ Server running in fallback mode');
+      console.log('⚠️ Server running in fallback mode');
       console.log('🔍 To fix: Replace YOUR_PASSWORD in the MongoDB URI with your actual password');
       console.log('🔍 The connection string should look like:');
       console.log('   mongodb+srv://mamanalgerienne:anesaya75@cluster0.iqodm96.mongodb.net/...');
     }
+    
+    console.log(`\n📋 MOBILE SETUP INSTRUCTIONS:`);
+    console.log(`1. Make sure your mobile device is on the same WiFi network`);
+    console.log(`2. Update LOCAL_IP in your frontend files to: ${localIP}`);
+    console.log(`3. Access your frontend using: http://${localIP}:3000 (or your frontend port)`);
+    console.log(`4. The mobile device will now connect to: http://${localIP}:${PORT}/api`);
   });
 }
 
