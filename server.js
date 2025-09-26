@@ -19,6 +19,76 @@ dirs.forEach(dir => {
   }
 });
 
+// Replace the "Setting up full API routes" section with this debugging version:
+function setupFullRoutes() {
+  if (routesLoaded) return;
+  
+  try {
+    console.log('🔍 Testing route imports one by one...');
+    
+    try {
+      console.log('Testing auth routes...');
+      const authRoutes = require('./routes/auth');
+      console.log('✅ Auth routes OK');
+    } catch (error) {
+      console.log('❌ Auth routes failed:', error.message);
+    }
+    
+    try {
+      console.log('Testing article routes...');
+      const articleRoutes = require('./routes/articles');
+      console.log('✅ Article routes OK');
+    } catch (error) {
+      console.log('❌ Article routes failed:', error.message);
+    }
+    
+    try {
+      console.log('Testing product routes...');
+      const productRoutes = require('./routes/products');
+      console.log('✅ Product routes OK');
+    } catch (error) {
+      console.log('❌ Product routes failed:', error.message);
+    }
+    
+    try {
+      console.log('Testing post routes...');
+      const postRoutes = require('./routes/posts');
+      console.log('✅ Post routes OK');
+    } catch (error) {
+      console.log('❌ Post routes failed:', error.message);
+    }
+    
+    try {
+      console.log('Testing comment routes...');
+      const commentRoutes = require('./routes/comments');
+      console.log('✅ Comment routes OK');
+    } catch (error) {
+      console.log('❌ Comment routes failed:', error.message);
+    }
+    
+    try {
+      console.log('Testing admin routes...');
+      const adminRoutes = require('./routes/admin');
+      console.log('✅ Admin routes OK');
+    } catch (error) {
+      console.log('❌ Admin routes failed:', error.message);
+    }
+    
+    try {
+      console.log('Testing order routes...');
+      const orderRoutes = require('./routes/Orders');
+      console.log('✅ Order routes OK');
+    } catch (error) {
+      console.log('❌ Order routes failed:', error.message);
+    }
+    
+    console.log('🔍 Route testing complete');
+    
+  } catch (error) {
+    console.error('Route import error:', error.message);
+    setupFallbackRoutes();
+  }
+}
 // CORS Configuration - More permissive for development
 const corsOptions = {
   origin: function (origin, callback) {
@@ -501,3 +571,4 @@ startServer().catch(error => {
 });
 
 module.exports = app;
+
