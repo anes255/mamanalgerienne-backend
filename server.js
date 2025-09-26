@@ -19,7 +19,7 @@ dirs.forEach(dir => {
   }
 });
 
-// CORS Configuration
+// CORS Configuration - More permissive for development
 const corsOptions = {
   origin: function (origin, callback) {
     // Allow requests with no origin (like mobile apps or curl requests)
@@ -30,10 +30,20 @@ const corsOptions = {
       process.env.FRONTEND_URL || 'https://maman-algerienne.onrender.com',
       'http://localhost:3000',
       'http://127.0.0.1:3000',
-      'https://maman-algerienne.onrender.com'
+      'http://localhost:5500', // Live Server default port
+      'http://127.0.0.1:5500',
+      'https://maman-algerienne.onrender.com',
+      'https://anes255.github.io', // GitHub Pages
+      // Add common development ports
+      'http://localhost:8080',
+      'http://localhost:3001',
+      'http://localhost:4000'
     ];
     
-    if (allowedOrigins.indexOf(origin) !== -1) {
+    // In development, be more permissive
+    if (process.env.NODE_ENV !== 'production') {
+      callback(null, true);
+    } else if (allowedOrigins.indexOf(origin) !== -1) {
       callback(null, true);
     } else {
       console.log('Blocked by CORS:', origin);
@@ -42,7 +52,8 @@ const corsOptions = {
   },
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization']
+  allowedHeaders: ['Content-Type', 'Authorization', 'Accept'],
+  optionsSuccessStatus: 200 // some legacy browsers (IE11, various SmartTVs) choke on 204
 };
 
 app.use(cors(corsOptions));
@@ -54,24 +65,21 @@ app.use(express.urlencoded({ extended: true, limit: process.env.MAX_FILE_SIZE ||
 // Serve static files from uploads directory
 app.use('/uploads', express.static(path.join(__dirname, process.env.UPLOAD_PATH || './uploads')));
 
-// Serve static files in production
-if (process.env.NODE_ENV === 'production') {
-  app.use(express.static(path.join(__dirname, 'public')));
-  
-  // Handle React routing, return all requests to the app (if you had a React frontend)
-  // app.get('*', (req, res) => {
-  //   res.sendFile(path.join(__dirname, 'public', 'index.html'));
-  // });
-}
+// Request logging middleware
+app.use((req, res, next) => {
+  console.log(`${new Date().toISOString()} - ${req.method} ${req.path}`);
+  next();
+});
 
-// Health check
+// Health check - Enhanced
 app.get('/health', (req, res) => {
   res.json({ 
     status: 'OK', 
     message: 'Server is running',
     timestamp: new Date().toISOString(),
     dbStatus: mongoose.connection.readyState === 1 ? 'Connected' : 'Disconnected',
-    environment: process.env.NODE_ENV || 'development'
+    environment: process.env.NODE_ENV || 'development',
+    version: '1.0.0'
   });
 });
 
@@ -81,12 +89,14 @@ app.get('/api/test', (req, res) => {
     message: 'API is working', 
     routes: 'loaded',
     environment: process.env.NODE_ENV || 'development',
-    frontendUrl: process.env.FRONTEND_URL || 'not set'
+    frontendUrl: process.env.FRONTEND_URL || 'not set',
+    timestamp: new Date().toISOString()
   });
 });
 
 // Global flag to track if routes are loaded
 let routesLoaded = false;
+let dbConnected = false;
 
 // Setup full API routes
 function setupFullRoutes() {
@@ -104,19 +114,21 @@ function setupFullRoutes() {
     const adminRoutes = require('./routes/admin');
     const orderRoutes = require('./routes/Orders');
 
-    app.use('/api/orders', orderRoutes);
+    // Register routes
     app.use('/api/auth', authRoutes);
     app.use('/api/articles', articleRoutes);
     app.use('/api/products', productRoutes);
     app.use('/api/posts', postRoutes);
     app.use('/api/comments', commentRoutes);
     app.use('/api/admin', adminRoutes);
+    app.use('/api/orders', orderRoutes);
     
     routesLoaded = true;
     console.log('✅ All API routes loaded successfully');
     
   } catch (error) {
     console.error('Error loading routes:', error.message);
+    console.log('📋 Setting up fallback routes instead...');
     setupFallbackRoutes();
   }
 }
@@ -160,27 +172,152 @@ function setupFallbackRoutes() {
     }
   });
   
-  // Empty data routes
-  const emptyRoutes = [
-    '/api/articles',
-    '/api/products', 
-    '/api/posts',
-    '/api/comments'
+  // Sample articles for demonstration
+  const sampleArticles = [
+    {
+      _id: '1',
+      title: 'نصائح للأمهات الجدد',
+      content: 'مجموعة من النصائح المفيدة للأمهات اللاتي رزقن بمولود جديد...',
+      excerpt: 'نصائح مفيدة للتعامل مع المولود الجديد وتنظيم الوقت',
+      category: 'حملي',
+      author: { name: 'د. فاطمة أحمد', avatar: null },
+      images: [],
+      views: 245,
+      likes: [],
+      featured: true,
+      createdAt: new Date().toISOString()
+    },
+    {
+      _id: '2',
+      title: 'وصفات صحية للأطفال',
+      content: 'وصفات متنوعة ومفيدة لتحضير وجبات صحية ولذيذة للأطفال...',
+      excerpt: 'أفكار متجددة لوجبات صحية يحبها الأطفال',
+      category: 'كوزينتي',
+      author: { name: 'الشيف سارة', avatar: null },
+      images: [],
+      views: 189,
+      likes: [],
+      featured: true,
+      createdAt: new Date().toISOString()
+    },
+    {
+      _id: '3',
+      title: 'تنظيم المنزل مع الأطفال',
+      content: 'كيفية الحفاظ على نظافة وتنظيم المنزل مع وجود الأطفال...',
+      excerpt: 'استراتيجيات عملية لإدارة المنزل مع الأطفال',
+      category: 'بيتي',
+      author: { name: 'نور الهدى', avatar: null },
+      images: [],
+      views: 167,
+      likes: [],
+      featured: false,
+      createdAt: new Date().toISOString()
+    }
+  ];
+
+  const samplePosts = [
+    {
+      _id: 'ad1',
+      title: 'عرض خاص على منتجات الأطفال',
+      content: 'تخفيضات كبيرة على جميع منتجات الأطفال لفترة محدودة...',
+      type: 'ad',
+      adDetails: {
+        link: 'https://example.com',
+        buttonText: 'تسوقي الآن',
+        featured: true
+      },
+      images: [],
+      createdAt: new Date().toISOString()
+    }
   ];
   
-  emptyRoutes.forEach(route => {
-    app.get(route, (req, res) => {
-      res.json({
-        articles: [],
-        products: [],
-        posts: [],
-        comments: [],
-        pagination: { current: 1, pages: 0, total: 0 }
-      });
-    });
+  // Empty data routes with sample data
+  app.get('/api/articles', (req, res) => {
+    const { featured, page = 1, limit = 10, search, category } = req.query;
+    let filteredArticles = [...sampleArticles];
     
+    if (featured === 'true') {
+      filteredArticles = filteredArticles.filter(article => article.featured);
+    }
+    
+    if (search) {
+      filteredArticles = filteredArticles.filter(article => 
+        article.title.includes(search) || article.content.includes(search)
+      );
+    }
+    
+    if (category) {
+      filteredArticles = filteredArticles.filter(article => article.category === category);
+    }
+    
+    const startIndex = (page - 1) * limit;
+    const endIndex = startIndex + parseInt(limit);
+    const paginatedArticles = filteredArticles.slice(startIndex, endIndex);
+    
+    res.json({
+      articles: paginatedArticles,
+      pagination: { 
+        current: parseInt(page), 
+        pages: Math.ceil(filteredArticles.length / limit), 
+        total: filteredArticles.length 
+      }
+    });
+  });
+
+  app.get('/api/articles/category/:category', (req, res) => {
+    const { category } = req.params;
+    const filteredArticles = sampleArticles.filter(article => article.category === category);
+    
+    res.json({
+      articles: filteredArticles,
+      pagination: { current: 1, pages: 1, total: filteredArticles.length }
+    });
+  });
+
+  app.get('/api/posts', (req, res) => {
+    const { type, limit = 10 } = req.query;
+    let filteredPosts = [...samplePosts];
+    
+    if (type === 'ad') {
+      filteredPosts = filteredPosts.filter(post => post.type === 'ad');
+    }
+    
+    const limitedPosts = filteredPosts.slice(0, parseInt(limit));
+    
+    res.json({
+      posts: limitedPosts,
+      pagination: { current: 1, pages: 1, total: filteredPosts.length }
+    });
+  });
+
+  app.get('/api/products', (req, res) => {
+    res.json({
+      products: [],
+      pagination: { current: 1, pages: 0, total: 0 }
+    });
+  });
+
+  app.get('/api/comments', (req, res) => {
+    res.json({
+      comments: [],
+      pagination: { current: 1, pages: 0, total: 0 }
+    });
+  });
+  
+  // Individual item routes
+  const itemRoutes = ['/api/articles', '/api/products', '/api/posts'];
+  itemRoutes.forEach(route => {
     app.get(`${route}/:id`, (req, res) => {
-      res.status(404).json({ message: 'Item not found' });
+      if (route === '/api/articles') {
+        const article = sampleArticles.find(a => a._id === req.params.id);
+        if (article) {
+          res.json(article);
+        } else {
+          res.status(404).json({ message: 'Article not found' });
+        }
+      } else {
+        res.status(404).json({ message: 'Item not found' });
+      }
     });
     
     app.post(route, (req, res) => {
@@ -193,12 +330,23 @@ function setupFallbackRoutes() {
   // Admin dashboard route
   app.get('/api/admin/dashboard', (req, res) => {
     res.json({
-      counts: { articles: 0, products: 0, posts: 0, users: 1, comments: 0 },
-      stats: { todayViews: 0, pendingComments: 0, newUsersThisWeek: 0, popularCategory: 'عام' }
+      counts: { 
+        articles: sampleArticles.length, 
+        products: 0, 
+        posts: samplePosts.length, 
+        users: 1, 
+        comments: 0 
+      },
+      stats: { 
+        todayViews: 50, 
+        pendingComments: 0, 
+        newUsersThisWeek: 5, 
+        popularCategory: 'حملي' 
+      }
     });
   });
   
-  console.log('✅ Fallback routes set up');
+  console.log('✅ Fallback routes set up with sample data');
 }
 
 // MongoDB Atlas connection
@@ -211,9 +359,12 @@ async function connectToAtlas() {
     await mongoose.connect(MONGODB_URI, {
       useNewUrlParser: true,
       useUnifiedTopology: true,
+      serverSelectionTimeoutMS: 5000, // Timeout after 5s instead of 30s
+      connectTimeoutMS: 10000, // Give up initial connection after 10s
     });
     
     console.log('✅ Connected to MongoDB Atlas successfully');
+    dbConnected = true;
     
     // Create admin user after connection
     await createAdminUser();
@@ -224,10 +375,12 @@ async function connectToAtlas() {
     return true;
   } catch (error) {
     console.error('❌ MongoDB Atlas connection failed:', error.message);
+    dbConnected = false;
     
     if (error.message.includes('authentication failed')) {
       console.log('🔐 Please check your database password in the connection string');
-      console.log('🔐 Make sure to replace YOUR_PASSWORD with your actual password');
+    } else if (error.message.includes('ENOTFOUND')) {
+      console.log('🌐 Please check your internet connection');
     }
     
     return false;
@@ -268,9 +421,18 @@ async function createAdminUser() {
   }
 }
 
+// Error handling middleware
+app.use((err, req, res, next) => {
+  console.error('Server error:', err.message);
+  res.status(500).json({ 
+    message: 'Server error', 
+    error: process.env.NODE_ENV === 'development' ? err.message : 'Internal server error'
+  });
+});
+
 // Initialize server
 async function startServer() {
-  console.log('🚀 Starting server...');
+  console.log('🚀 Starting Maman Algerienne server...');
   console.log('Environment:', process.env.NODE_ENV || 'development');
   console.log('Frontend URL:', process.env.FRONTEND_URL || 'not set');
   
@@ -278,15 +440,9 @@ async function startServer() {
   const dbConnected = await connectToAtlas();
   
   if (!dbConnected) {
-    // Use fallback routes if database connection fails
+    console.log('⚠️ Database connection failed, using fallback mode');
     setupFallbackRoutes();
   }
-  
-  // Error handling middleware
-  app.use((err, req, res, next) => {
-    console.error('Server error:', err.message);
-    res.status(500).json({ message: 'Server error', error: err.message });
-  });
 
   // 404 handler - MUST be LAST
   app.use('*', (req, res) => {
@@ -294,14 +450,21 @@ async function startServer() {
     res.status(404).json({ 
       message: 'Route not found', 
       path: req.originalUrl,
-      method: req.method
+      method: req.method,
+      availableRoutes: [
+        '/health',
+        '/api/test', 
+        '/api/articles',
+        '/api/posts',
+        '/api/auth/login'
+      ]
     });
   });
 
   // Start server
   const PORT = process.env.PORT || 5000;
-  app.listen(PORT, () => {
-    console.log(`\n🚀 Server running on port ${PORT}`);
+  const server = app.listen(PORT, () => {
+    console.log(`\n🌟 Maman Algerienne Server running on port ${PORT}`);
     console.log(`📊 Health check: http://localhost:${PORT}/health`);
     console.log(`🧪 API Test: http://localhost:${PORT}/api/test`);
     console.log(`📰 Articles: http://localhost:${PORT}/api/articles`);
@@ -314,9 +477,20 @@ async function startServer() {
     if (dbConnected) {
       console.log('✅ Server ready with MongoDB Atlas');
     } else {
-      console.log('⚠️ Server running in fallback mode');
-      console.log('🔍 To fix: Check MongoDB Atlas connection string and credentials');
+      console.log('⚠️ Server running in fallback mode with sample data');
+      console.log('🔍 To fix: Check MongoDB Atlas connection and credentials');
     }
+    
+    console.log('═'.repeat(60));
+  });
+
+  // Graceful shutdown
+  process.on('SIGTERM', () => {
+    console.log('SIGTERM received, shutting down gracefully');
+    server.close(() => {
+      console.log('Process terminated');
+      mongoose.connection.close();
+    });
   });
 }
 
