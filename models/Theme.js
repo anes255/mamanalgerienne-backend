@@ -1,245 +1,351 @@
-// models/Theme.js - Create this new file
 const mongoose = require('mongoose');
 
 const ThemeSchema = new mongoose.Schema({
   name: {
     type: String,
-    default: 'default'
+    required: [true, 'اسم المظهر مطلوب'],
+    trim: true,
+    unique: true,
+    maxlength: [100, 'اسم المظهر يجب أن يكون أقل من 100 حرف']
+  },
+  description: {
+    type: String,
+    trim: true,
+    maxlength: [300, 'وصف المظهر يجب أن يكون أقل من 300 حرف']
   },
   colors: {
-    primaryColor: {
+    primary: {
       type: String,
-      default: '#d4a574'
+      required: [true, 'اللون الأساسي مطلوب'],
+      validate: {
+        validator: function(v) {
+          return /^#([A-Fa-f0-9]{6}|[A-Fa-f0-9]{3})$/.test(v);
+        },
+        message: 'اللون الأساسي يجب أن يكون بصيغة hex صحيحة'
+      }
     },
-    secondaryColor: {
+    secondary: {
       type: String,
-      default: '#f8e8d4'
+      required: [true, 'اللون الثانوي مطلوب'],
+      validate: {
+        validator: function(v) {
+          return /^#([A-Fa-f0-9]{6}|[A-Fa-f0-9]{3})$/.test(v);
+        },
+        message: 'اللون الثانوي يجب أن يكون بصيغة hex صحيحة'
+      }
     },
-    accentColor: {
+    accent: {
       type: String,
-      default: '#b8860b'
+      validate: {
+        validator: function(v) {
+          return !v || /^#([A-Fa-f0-9]{6}|[A-Fa-f0-9]{3})$/.test(v);
+        },
+        message: 'لون التمييز يجب أن يكون بصيغة hex صحيحة'
+      }
     },
-    textColor: {
+    background: {
       type: String,
-      default: '#2c2c2c'
+      default: '#ffffff',
+      validate: {
+        validator: function(v) {
+          return /^#([A-Fa-f0-9]{6}|[A-Fa-f0-9]{3})$/.test(v);
+        },
+        message: 'لون الخلفية يجب أن يكون بصيغة hex صحيحة'
+      }
     },
-    lightText: {
+    text: {
       type: String,
-      default: '#666'
+      default: '#333333',
+      validate: {
+        validator: function(v) {
+          return /^#([A-Fa-f0-9]{6}|[A-Fa-f0-9]{3})$/.test(v);
+        },
+        message: 'لون النص يجب أن يكون بصيغة hex صحيحة'
+      }
     },
-    bgColor: {
+    border: {
       type: String,
-      default: '#fdfbf7'
-    },
-    borderColor: {
-      type: String,
-      default: '#e5d5c8'
+      default: '#e0e0e0',
+      validate: {
+        validator: function(v) {
+          return /^#([A-Fa-f0-9]{6}|[A-Fa-f0-9]{3})$/.test(v);
+        },
+        message: 'لون الحدود يجب أن يكون بصيغة hex صحيحة'
+      }
     }
+  },
+  fonts: {
+    primary: {
+      type: String,
+      default: 'Cairo, sans-serif'
+    },
+    secondary: {
+      type: String,
+      default: 'Arial, sans-serif'
+    },
+    sizes: {
+      small: { type: Number, default: 14, min: 10, max: 20 },
+      medium: { type: Number, default: 16, min: 12, max: 24 },
+      large: { type: Number, default: 18, min: 14, max: 28 },
+      xlarge: { type: Number, default: 24, min: 18, max: 36 }
+    }
+  },
+  layout: {
+    containerWidth: {
+      type: Number,
+      default: 1200,
+      min: 800,
+      max: 1600
+    },
+    borderRadius: {
+      type: Number,
+      default: 8,
+      min: 0,
+      max: 20
+    },
+    spacing: {
+      small: { type: Number, default: 8, min: 4, max: 16 },
+      medium: { type: Number, default: 16, min: 8, max: 24 },
+      large: { type: Number, default: 24, min: 16, max: 32 },
+      xlarge: { type: Number, default: 32, min: 24, max: 48 }
+    }
+  },
+  customCSS: {
+    type: String,
+    maxlength: [10000, 'كود CSS المخصص يجب أن يكون أقل من 10000 حرف']
+  },
+  isDefault: {
+    type: Boolean,
+    default: false
   },
   isActive: {
     type: Boolean,
     default: true
   },
-  createdAt: {
-    type: Date,
-    default: Date.now
+  createdBy: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'User',
+    required: true
   },
-  updatedAt: {
-    type: Date,
-    default: Date.now
+  usageCount: {
+    type: Number,
+    default: 0,
+    min: 0
+  },
+  tags: [{
+    type: String,
+    trim: true,
+    maxlength: [30, 'الوسم يجب أن يكون أقل من 30 حرف']
+  }],
+  preview: {
+    type: String, // Base64 encoded image or file path
+    maxlength: [1000000, 'صورة المعاينة كبيرة جداً']
+  },
+  version: {
+    type: String,
+    default: '1.0.0'
+  },
+  compatibility: {
+    minVersion: String,
+    maxVersion: String
   }
+}, {
+  timestamps: true
 });
 
-// Ensure only one active theme
+// Indexes for better performance
+ThemeSchema.index({ isDefault: 1 });
+ThemeSchema.index({ isActive: 1 });
+ThemeSchema.index({ createdBy: 1 });
+ThemeSchema.index({ usageCount: -1 });
+ThemeSchema.index({ name: 'text', description: 'text', tags: 'text' });
+
+// Ensure only one default theme
 ThemeSchema.pre('save', async function(next) {
-  if (this.isActive) {
+  if (this.isDefault && this.isModified('isDefault')) {
+    // Remove default from other themes
     await this.constructor.updateMany(
       { _id: { $ne: this._id } },
-      { isActive: false }
+      { $set: { isDefault: false } }
     );
   }
-  this.updatedAt = new Date();
   next();
 });
 
+// Virtual for CSS variables
+ThemeSchema.virtual('cssVariables').get(function() {
+  return {
+    '--primary-color': this.colors.primary,
+    '--secondary-color': this.colors.secondary,
+    '--accent-color': this.colors.accent || this.colors.primary,
+    '--background-color': this.colors.background,
+    '--text-color': this.colors.text,
+    '--border-color': this.colors.border,
+    '--font-primary': this.fonts.primary,
+    '--font-secondary': this.fonts.secondary,
+    '--font-size-small': this.fonts.sizes.small + 'px',
+    '--font-size-medium': this.fonts.sizes.medium + 'px',
+    '--font-size-large': this.fonts.sizes.large + 'px',
+    '--font-size-xlarge': this.fonts.sizes.xlarge + 'px',
+    '--container-width': this.layout.containerWidth + 'px',
+    '--border-radius': this.layout.borderRadius + 'px',
+    '--spacing-small': this.layout.spacing.small + 'px',
+    '--spacing-medium': this.layout.spacing.medium + 'px',
+    '--spacing-large': this.layout.spacing.large + 'px',
+    '--spacing-xlarge': this.layout.spacing.xlarge + 'px'
+  };
+});
+
+// Virtual for complete CSS
+ThemeSchema.virtual('compiledCSS').get(function() {
+  const variables = this.cssVariables;
+  let css = ':root {\n';
+  
+  for (const [key, value] of Object.entries(variables)) {
+    css += `  ${key}: ${value};\n`;
+  }
+  
+  css += '}\n\n';
+  
+  if (this.customCSS) {
+    css += this.customCSS;
+  }
+  
+  return css;
+});
+
+// Method to generate gradient
+ThemeSchema.methods.generateGradient = function(direction = '135deg') {
+  return `linear-gradient(${direction}, ${this.colors.primary} 0%, ${this.colors.secondary} 100%)`;
+};
+
+// Method to get contrasting text color
+ThemeSchema.methods.getContrastColor = function(backgroundColor) {
+  // Convert hex to RGB
+  const hex = backgroundColor.replace('#', '');
+  const r = parseInt(hex.substr(0, 2), 16);
+  const g = parseInt(hex.substr(2, 2), 16);
+  const b = parseInt(hex.substr(4, 2), 16);
+  
+  // Calculate luminance
+  const luminance = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
+  
+  return luminance > 0.5 ? '#000000' : '#ffffff';
+};
+
+// Method to apply theme to user
+ThemeSchema.methods.applyToUser = async function(userId) {
+  const User = require('./User');
+  await User.findByIdAndUpdate(userId, {
+    'preferences.theme': this._id
+  });
+  
+  this.usageCount += 1;
+  await this.save();
+};
+
+// Method to clone theme
+ThemeSchema.methods.clone = function(newName, userId) {
+  const clonedTheme = new this.constructor({
+    name: newName,
+    description: `نسخة من ${this.name}`,
+    colors: { ...this.colors },
+    fonts: { ...this.fonts },
+    layout: { ...this.layout },
+    customCSS: this.customCSS,
+    createdBy: userId,
+    tags: [...this.tags, 'نسخة'],
+    version: '1.0.0'
+  });
+  
+  return clonedTheme;
+};
+
+// Static method to get default theme
+ThemeSchema.statics.getDefault = function() {
+  return this.findOne({ isDefault: true, isActive: true });
+};
+
+// Static method to get popular themes
+ThemeSchema.statics.getPopular = function(limit = 10) {
+  return this.find({ isActive: true })
+    .sort({ usageCount: -1 })
+    .limit(limit)
+    .populate('createdBy', 'name');
+};
+
+// Static method to search themes
+ThemeSchema.statics.search = function(query, options = {}) {
+  const { limit = 20, skip = 0 } = options;
+  
+  return this.find({
+    $text: { $search: query },
+    isActive: true
+  }, {
+    score: { $meta: 'textScore' }
+  })
+  .sort({ score: { $meta: 'textScore' } })
+  .populate('createdBy', 'name')
+  .skip(skip)
+  .limit(limit);
+};
+
+// Static method to create default theme
+ThemeSchema.statics.createDefault = async function() {
+  const defaultTheme = await this.findOne({ isDefault: true });
+  if (defaultTheme) return defaultTheme;
+  
+  const adminUser = await require('./User').findOne({ isAdmin: true });
+  if (!adminUser) throw new Error('Admin user not found');
+  
+  const theme = new this({
+    name: 'المظهر الافتراضي',
+    description: 'المظهر الافتراضي لموقع ماما الجزائرية',
+    colors: {
+      primary: '#d4a574',
+      secondary: '#f4e6d2',
+      accent: '#b8956a',
+      background: '#ffffff',
+      text: '#333333',
+      border: '#e0e0e0'
+    },
+    fonts: {
+      primary: 'Cairo, sans-serif',
+      secondary: 'Arial, sans-serif',
+      sizes: {
+        small: 14,
+        medium: 16,
+        large: 18,
+        xlarge: 24
+      }
+    },
+    layout: {
+      containerWidth: 1200,
+      borderRadius: 8,
+      spacing: {
+        small: 8,
+        medium: 16,
+        large: 24,
+        xlarge: 32
+      }
+    },
+    isDefault: true,
+    isActive: true,
+    createdBy: adminUser._id,
+    tags: ['افتراضي', 'ذهبي', 'كلاسيكي']
+  });
+  
+  await theme.save();
+  return theme;
+};
+
+// Ensure virtual fields are serialized
+ThemeSchema.set('toJSON', {
+  virtuals: true,
+  transform: function(doc, ret) {
+    delete ret.__v;
+    return ret;
+  }
+});
+
 module.exports = mongoose.model('Theme', ThemeSchema);
-
-// routes/admin.js - Create this new file or add to existing admin routes
-const express = require('express');
-const Theme = require('../models/Theme');
-const { adminAuth } = require('../middleware/auth');
-
-const router = express.Router();
-
-// Get current active theme
-router.get('/theme', async (req, res) => {
-  try {
-    let theme = await Theme.findOne({ isActive: true });
-    
-    if (!theme) {
-      // Create default theme if none exists
-      theme = new Theme({
-        name: 'default',
-        colors: {
-          primaryColor: '#d4a574',
-          secondaryColor: '#f8e8d4',
-          accentColor: '#b8860b',
-          textColor: '#2c2c2c',
-          lightText: '#666',
-          bgColor: '#fdfbf7',
-          borderColor: '#e5d5c8'
-        },
-        isActive: true
-      });
-      await theme.save();
-    }
-
-    res.json({ theme: theme.colors });
-  } catch (error) {
-    console.error('Get theme error:', error);
-    res.status(500).json({ message: 'خطأ في جلب إعدادات الألوان' });
-  }
-});
-
-// Update theme (Admin only)
-router.post('/theme', adminAuth, async (req, res) => {
-  try {
-    const { theme } = req.body;
-
-    if (!theme) {
-      return res.status(400).json({ message: 'بيانات الألوان مطلوبة' });
-    }
-
-    // Validate color format
-    const colorRegex = /^#[0-9A-F]{6}$/i;
-    const colors = Object.values(theme);
-    
-    for (let color of colors) {
-      if (!colorRegex.test(color)) {
-        return res.status(400).json({ message: 'صيغة الألوان غير صحيحة' });
-      }
-    }
-
-    // Find current active theme or create new one
-    let currentTheme = await Theme.findOne({ isActive: true });
-    
-    if (currentTheme) {
-      currentTheme.colors = theme;
-      currentTheme.updatedAt = new Date();
-      await currentTheme.save();
-    } else {
-      currentTheme = new Theme({
-        name: 'custom',
-        colors: theme,
-        isActive: true
-      });
-      await currentTheme.save();
-    }
-
-    res.json({ 
-      message: 'تم حفظ إعدادات الألوان بنجاح',
-      theme: currentTheme.colors 
-    });
-  } catch (error) {
-    console.error('Update theme error:', error);
-    res.status(500).json({ message: 'خطأ في حفظ إعدادات الألوان' });
-  }
-});
-
-// Reset theme to default (Admin only)
-router.post('/theme/reset', adminAuth, async (req, res) => {
-  try {
-    const defaultColors = {
-      primaryColor: '#d4a574',
-      secondaryColor: '#f8e8d4',
-      accentColor: '#b8860b',
-      textColor: '#2c2c2c',
-      lightText: '#666',
-      bgColor: '#fdfbf7',
-      borderColor: '#e5d5c8'
-    };
-
-    let currentTheme = await Theme.findOne({ isActive: true });
-    
-    if (currentTheme) {
-      currentTheme.colors = defaultColors;
-      currentTheme.name = 'default';
-      currentTheme.updatedAt = new Date();
-      await currentTheme.save();
-    } else {
-      currentTheme = new Theme({
-        name: 'default',
-        colors: defaultColors,
-        isActive: true
-      });
-      await currentTheme.save();
-    }
-
-    res.json({ 
-      message: 'تم إعادة تعيين الألوان للافتراضية',
-      theme: currentTheme.colors 
-    });
-  } catch (error) {
-    console.error('Reset theme error:', error);
-    res.status(500).json({ message: 'خطأ في إعادة تعيين الألوان' });
-  }
-});
-
-// Get theme history (Admin only)
-router.get('/themes/history', adminAuth, async (req, res) => {
-  try {
-    const themes = await Theme.find({})
-      .sort({ updatedAt: -1 })
-      .limit(10);
-
-    res.json({ themes });
-  } catch (error) {
-    console.error('Get theme history error:', error);
-    res.status(500).json({ message: 'خطأ في جلب سجل الألوان' });
-  }
-});
-
-module.exports = router;
-
-// Add this to your server.js file - Theme route
-// app.use('/api/admin', require('./routes/admin'));
-
-// Add this to your app.js (frontend) - Theme loader for all pages
-// Add this function to load theme on page load for all users
-
-// Theme loader for frontend (add to app.js)
-async function loadSiteTheme() {
-  try {
-    const response = await fetch(`${API_BASE_URL}/admin/theme`);
-    if (response.ok) {
-      const data = await response.json();
-      if (data.theme) {
-        applyThemeToPage(data.theme);
-      }
-    }
-  } catch (error) {
-    console.error('Error loading site theme:', error);
-    // Use default theme if loading fails
-  }
-}
-
-function applyThemeToPage(theme) {
-  const root = document.documentElement;
-  root.style.setProperty('--primary-color', theme.primaryColor);
-  root.style.setProperty('--secondary-color', theme.secondaryColor);
-  root.style.setProperty('--accent-color', theme.accentColor);
-  root.style.setProperty('--text-color', theme.textColor);
-  root.style.setProperty('--light-text', theme.lightText);
-  root.style.setProperty('--bg-color', theme.bgColor);
-  root.style.setProperty('--border-color', theme.borderColor);
-  root.style.setProperty('--gradient', `linear-gradient(135deg, ${theme.primaryColor} 0%, ${theme.secondaryColor} 100%)`);
-}
-
-// Call this when DOM is ready
-document.addEventListener('DOMContentLoaded', function() {
-  loadSiteTheme();
-});
-
-// Export for global use
-window.loadSiteTheme = loadSiteTheme;
-window.applyThemeToPage = applyThemeToPage;
