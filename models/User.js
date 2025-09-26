@@ -6,7 +6,8 @@ const UserSchema = new mongoose.Schema({
     type: String,
     required: [true, 'الاسم مطلوب'],
     trim: true,
-    minlength: [2, 'الاسم يجب أن يكون حرفين على الأقل']
+    minlength: [2, 'الاسم يجب أن يكون أكثر من حرفين'],
+    maxlength: [50, 'الاسم يجب أن يكون أقل من 50 حرف']
   },
   email: {
     type: String,
@@ -14,43 +15,106 @@ const UserSchema = new mongoose.Schema({
     unique: true,
     lowercase: true,
     trim: true,
-    match: [/^\w+([.-]?\w+)*@\w+([.-]?\w+)*(\.\w{2,3})+$/, 'البريد الإلكتروني غير صالح']
-  },
-  phone: {
-    type: String,
-    required: [true, 'رقم الهاتف مطلوب'],
-    trim: true,
-    match: [/^[0-9]{10}$/, 'رقم الهاتف يجب أن يكون 10 أرقام']
+    match: [/^\w+([.-]?\w+)*@\w+([.-]?\w+)*(\.\w{2,3})+$/, 'يرجى إدخال بريد إلكتروني صحيح']
   },
   password: {
     type: String,
     required: [true, 'كلمة المرور مطلوبة'],
     minlength: [6, 'كلمة المرور يجب أن تكون 6 أحرف على الأقل']
   },
+  phone: {
+    type: String,
+    required: [true, 'رقم الهاتف مطلوب'],
+    trim: true,
+    match: [/^[0-9]{10}$/, 'يرجى إدخال رقم هاتف صحيح']
+  },
+  avatar: {
+    type: String, // Filename of uploaded avatar
+    default: null
+  },
   isAdmin: {
     type: Boolean,
     default: false
   },
-  avatar: {
-    type: String,
-    default: ''
-  },
-  isActive: {
+  isVerified: {
     type: Boolean,
-    default: true
+    default: false
   },
-  lastLogin: {
+  bio: {
+    type: String,
+    maxlength: [500, 'النبذة الشخصية يجب أن تكون أقل من 500 حرف'],
+    trim: true
+  },
+  location: {
+    type: String,
+    trim: true,
+    maxlength: [100, 'الموقع يجب أن يكون أقل من 100 حرف']
+  },
+  birthDate: {
     type: Date
   },
-  createdAt: {
+  preferences: {
+    notifications: {
+      email: {
+        type: Boolean,
+        default: true
+      },
+      posts: {
+        type: Boolean,
+        default: true
+      },
+      comments: {
+        type: Boolean,
+        default: true
+      }
+    },
+    privacy: {
+      showEmail: {
+        type: Boolean,
+        default: false
+      },
+      showPhone: {
+        type: Boolean,
+        default: false
+      }
+    }
+  },
+  stats: {
+    postsCount: {
+      type: Number,
+      default: 0
+    },
+    commentsCount: {
+      type: Number,
+      default: 0
+    },
+    likesReceived: {
+      type: Number,
+      default: 0
+    }
+  },
+  lastLogin: {
     type: Date,
     default: Date.now
   },
-  updatedAt: {
-    type: Date,
-    default: Date.now
-  }
+  status: {
+    type: String,
+    enum: ['active', 'suspended', 'banned'],
+    default: 'active'
+  },
+  resetPasswordToken: String,
+  resetPasswordExpires: Date,
+  emailVerificationToken: String,
+  emailVerificationExpires: Date
+}, {
+  timestamps: true
 });
+
+// Index for better performance
+UserSchema.index({ email: 1 });
+UserSchema.index({ isAdmin: 1 });
+UserSchema.index({ status: 1 });
+UserSchema.index({ createdAt: -1 });
 
 // Hash password before saving
 UserSchema.pre('save', async function(next) {
@@ -59,20 +123,15 @@ UserSchema.pre('save', async function(next) {
   
   try {
     // Hash password with cost of 12
-    this.password = await bcrypt.hash(this.password, 12);
+    const salt = await bcrypt.genSalt(12);
+    this.password = await bcrypt.hash(this.password, salt);
     next();
   } catch (error) {
     next(error);
   }
 });
 
-// Update the updatedAt field before saving
-UserSchema.pre('save', function(next) {
-  this.updatedAt = new Date();
-  next();
-});
-
-// Instance method to check password
+// Compare password method
 UserSchema.methods.comparePassword = async function(candidatePassword) {
   try {
     return await bcrypt.compare(candidatePassword, this.password);
@@ -81,13 +140,59 @@ UserSchema.methods.comparePassword = async function(candidatePassword) {
   }
 };
 
-// Instance method to update last login
-UserSchema.methods.updateLastLogin = function() {
-  this.lastLogin = new Date();
-  return this.save();
+// Get public profile (without sensitive data)
+UserSchema.methods.getPublicProfile = function() {
+  return {
+    _id: this._id,
+    name: this.name,
+    avatar: this.avatar,
+    bio: this.bio,
+    location: this.location,
+    stats: this.stats,
+    createdAt: this.createdAt,
+    isAdmin: this.isAdmin
+  };
 };
 
-// Create indexes separately (this prevents the duplicate index warning)
-// Remove the schema.index() calls since unique: true already creates an index
+// Static method to find by email
+UserSchema.statics.findByEmail = function(email) {
+  return this.findOne({ email: email.toLowerCase() });
+};
+
+// Virtual for user's age
+UserSchema.virtual('age').get(function() {
+  if (!this.birthDate) return null;
+  const today = new Date();
+  const birthDate = new Date(this.birthDate);
+  let age = today.getFullYear() - birthDate.getFullYear();
+  const monthDiff = today.getMonth() - birthDate.getMonth();
+  
+  if (monthDiff < 0 || (monthDiff === 0 && today.getDate() < birthDate.getDate())) {
+    age--;
+  }
+  
+  return age;
+});
+
+// Virtual for full avatar URL
+UserSchema.virtual('avatarUrl').get(function() {
+  if (!this.avatar) return null;
+  return `/uploads/avatars/${this.avatar}`;
+});
+
+// Ensure virtual fields are serialized
+UserSchema.set('toJSON', {
+  virtuals: true,
+  transform: function(doc, ret) {
+    // Remove sensitive fields from JSON output
+    delete ret.password;
+    delete ret.resetPasswordToken;
+    delete ret.resetPasswordExpires;
+    delete ret.emailVerificationToken;
+    delete ret.emailVerificationExpires;
+    delete ret.__v;
+    return ret;
+  }
+});
 
 module.exports = mongoose.model('User', UserSchema);
