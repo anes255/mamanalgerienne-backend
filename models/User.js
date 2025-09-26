@@ -2,12 +2,13 @@ const mongoose = require('mongoose');
 const bcrypt = require('bcryptjs');
 
 const UserSchema = new mongoose.Schema({
-  name: {
+  username: {
     type: String,
-    required: [true, 'الاسم مطلوب'],
+    required: [true, 'اسم المستخدم مطلوب'],
+    unique: true,
     trim: true,
-    minlength: [2, 'الاسم يجب أن يكون أكثر من حرفين'],
-    maxlength: [50, 'الاسم يجب أن يكون أقل من 50 حرف']
+    minlength: [3, 'اسم المستخدم يجب أن يكون على الأقل 3 أحرف'],
+    maxlength: [30, 'اسم المستخدم لا يمكن أن يتجاوز 30 حرف']
   },
   email: {
     type: String,
@@ -20,179 +21,244 @@ const UserSchema = new mongoose.Schema({
   password: {
     type: String,
     required: [true, 'كلمة المرور مطلوبة'],
-    minlength: [6, 'كلمة المرور يجب أن تكون 6 أحرف على الأقل']
+    minlength: [6, 'كلمة المرور يجب أن تكون على الأقل 6 أحرف']
   },
-  phone: {
+  fullName: {
     type: String,
-    required: [true, 'رقم الهاتف مطلوب'],
+    required: [true, 'الاسم الكامل مطلوب'],
     trim: true,
-    match: [/^[0-9]{10}$/, 'يرجى إدخال رقم هاتف صحيح']
+    maxlength: [100, 'الاسم الكامل لا يمكن أن يتجاوز 100 حرف']
   },
   avatar: {
-    type: String, // Filename of uploaded avatar
+    type: String,
     default: null
-  },
-  isAdmin: {
-    type: Boolean,
-    default: false
-  },
-  isVerified: {
-    type: Boolean,
-    default: false
   },
   bio: {
     type: String,
-    maxlength: [500, 'النبذة الشخصية يجب أن تكون أقل من 500 حرف'],
-    trim: true
+    maxlength: [500, 'النبذة التعريفية لا يمكن أن تتجاوز 500 حرف'],
+    default: ''
   },
   location: {
     type: String,
-    trim: true,
-    maxlength: [100, 'الموقع يجب أن يكون أقل من 100 حرف']
+    maxlength: [100, 'الموقع لا يمكن أن يتجاوز 100 حرف'],
+    default: ''
   },
-  birthDate: {
-    type: Date
+  role: {
+    type: String,
+    enum: ['user', 'admin'],
+    default: 'user'
+  },
+  isActive: {
+    type: Boolean,
+    default: true
+  },
+  emailVerified: {
+    type: Boolean,
+    default: false
+  },
+  lastLogin: {
+    type: Date,
+    default: null
   },
   preferences: {
+    newsletter: {
+      type: Boolean,
+      default: true
+    },
     notifications: {
-      email: {
-        type: Boolean,
-        default: true
-      },
-      posts: {
-        type: Boolean,
-        default: true
-      },
-      comments: {
-        type: Boolean,
-        default: true
-      }
+      type: Boolean,
+      default: true
     },
     privacy: {
-      showEmail: {
-        type: Boolean,
-        default: false
-      },
-      showPhone: {
-        type: Boolean,
-        default: false
-      }
+      type: String,
+      enum: ['public', 'friends', 'private'],
+      default: 'public'
     }
+  },
+  socialMedia: {
+    facebook: String,
+    instagram: String,
+    twitter: String
   },
   stats: {
     postsCount: {
       type: Number,
       default: 0
     },
-    commentsCount: {
-      type: Number,
-      default: 0
-    },
     likesReceived: {
       type: Number,
       default: 0
+    },
+    commentsCount: {
+      type: Number,
+      default: 0
     }
-  },
-  lastLogin: {
-    type: Date,
-    default: Date.now
-  },
-  status: {
-    type: String,
-    enum: ['active', 'suspended', 'banned'],
-    default: 'active'
-  },
-  resetPasswordToken: String,
-  resetPasswordExpires: Date,
-  emailVerificationToken: String,
-  emailVerificationExpires: Date
+  }
 }, {
-  timestamps: true
+  timestamps: true,
+  toJSON: { 
+    transform: function(doc, ret) {
+      delete ret.password;
+      return ret;
+    }
+  }
 });
 
-// Index for better performance
+// Indexes for better performance
 UserSchema.index({ email: 1 });
-UserSchema.index({ isAdmin: 1 });
-UserSchema.index({ status: 1 });
+UserSchema.index({ username: 1 });
 UserSchema.index({ createdAt: -1 });
+UserSchema.index({ lastLogin: -1 });
 
-// Hash password before saving
+// Pre-save middleware to hash password
 UserSchema.pre('save', async function(next) {
   // Only hash the password if it has been modified (or is new)
   if (!this.isModified('password')) return next();
-  
+
   try {
     // Hash password with cost of 12
-    const salt = await bcrypt.genSalt(12);
-    this.password = await bcrypt.hash(this.password, salt);
+    const saltRounds = 12;
+    this.password = await bcrypt.hash(this.password, saltRounds);
     next();
   } catch (error) {
     next(error);
   }
 });
 
-// Compare password method
+// Instance method to check password
 UserSchema.methods.comparePassword = async function(candidatePassword) {
   try {
     return await bcrypt.compare(candidatePassword, this.password);
   } catch (error) {
-    throw error;
+    throw new Error('Error comparing passwords');
   }
 };
 
-// Get public profile (without sensitive data)
+// Instance method to get public profile
 UserSchema.methods.getPublicProfile = function() {
-  return {
-    _id: this._id,
-    name: this.name,
-    avatar: this.avatar,
-    bio: this.bio,
-    location: this.location,
-    stats: this.stats,
-    createdAt: this.createdAt,
-    isAdmin: this.isAdmin
-  };
+  const user = this.toObject();
+  delete user.password;
+  delete user.email; // Hide email in public profile
+  return user;
 };
 
-// Static method to find by email
-UserSchema.statics.findByEmail = function(email) {
-  return this.findOne({ email: email.toLowerCase() });
+// Instance method to get safe profile (for logged-in user)
+UserSchema.methods.getSafeProfile = function() {
+  const user = this.toObject();
+  delete user.password;
+  return user;
 };
 
-// Virtual for user's age
-UserSchema.virtual('age').get(function() {
-  if (!this.birthDate) return null;
-  const today = new Date();
-  const birthDate = new Date(this.birthDate);
-  let age = today.getFullYear() - birthDate.getFullYear();
-  const monthDiff = today.getMonth() - birthDate.getMonth();
-  
-  if (monthDiff < 0 || (monthDiff === 0 && today.getDate() < birthDate.getDate())) {
-    age--;
+// Static method to find user by email or username
+UserSchema.statics.findByEmailOrUsername = function(identifier) {
+  return this.findOne({
+    $or: [
+      { email: identifier.toLowerCase() },
+      { username: identifier }
+    ]
+  });
+};
+
+// Static method to create admin user
+UserSchema.statics.createAdmin = async function(adminData) {
+  try {
+    const existingAdmin = await this.findOne({ 
+      $or: [
+        { email: adminData.email },
+        { role: 'admin' }
+      ]
+    });
+
+    if (existingAdmin) {
+      return { success: false, message: 'Admin user already exists' };
+    }
+
+    const admin = new this({
+      ...adminData,
+      role: 'admin',
+      emailVerified: true,
+      isActive: true
+    });
+
+    await admin.save();
+    return { success: true, user: admin };
+  } catch (error) {
+    return { success: false, message: error.message };
   }
-  
-  return age;
+};
+
+// Virtual for full profile URL
+UserSchema.virtual('profileUrl').get(function() {
+  return `/users/${this.username}`;
 });
 
-// Virtual for full avatar URL
-UserSchema.virtual('avatarUrl').get(function() {
-  if (!this.avatar) return null;
-  return `/uploads/avatars/${this.avatar}`;
+// Virtual for display name
+UserSchema.virtual('displayName').get(function() {
+  return this.fullName || this.username;
 });
 
-// Ensure virtual fields are serialized
-UserSchema.set('toJSON', {
-  virtuals: true,
-  transform: function(doc, ret) {
-    // Remove sensitive fields from JSON output
-    delete ret.password;
-    delete ret.resetPasswordToken;
-    delete ret.resetPasswordExpires;
-    delete ret.emailVerificationToken;
-    delete ret.emailVerificationExpires;
-    delete ret.__v;
-    return ret;
+// Method to update last login
+UserSchema.methods.updateLastLogin = function() {
+  this.lastLogin = new Date();
+  return this.save();
+};
+
+// Method to increment post count
+UserSchema.methods.incrementPostCount = function() {
+  this.stats.postsCount += 1;
+  return this.save();
+};
+
+// Method to increment likes received
+UserSchema.methods.incrementLikesReceived = function() {
+  this.stats.likesReceived += 1;
+  return this.save();
+};
+
+// Method to increment comments count
+UserSchema.methods.incrementCommentsCount = function() {
+  this.stats.commentsCount += 1;
+  return this.save();
+};
+
+// Pre-remove middleware to clean up related data
+UserSchema.pre('remove', async function(next) {
+  try {
+    // Here you could remove user's posts, comments, etc.
+    // const Post = mongoose.model('Post');
+    // await Post.deleteMany({ author: this._id });
+    
+    console.log(`Cleaning up data for user: ${this.username}`);
+    next();
+  } catch (error) {
+    next(error);
   }
 });
 
-module.exports = mongoose.model('User', UserSchema);
+// Model validation for unique fields
+UserSchema.post('save', function(error, doc, next) {
+  if (error.name === 'MongoServerError' && error.code === 11000) {
+    const field = Object.keys(error.keyPattern)[0];
+    let message = '';
+    
+    switch (field) {
+      case 'email':
+        message = 'هذا البريد الإلكتروني مستخدم بالفعل';
+        break;
+      case 'username':
+        message = 'اسم المستخدم هذا مأخوذ بالفعل';
+        break;
+      default:
+        message = 'هذه البيانات مستخدمة بالفعل';
+    }
+    
+    error.message = message;
+    next(error);
+  } else {
+    next(error);
+  }
+});
+
+const User = mongoose.model('User', UserSchema);
+
+module.exports = User;
