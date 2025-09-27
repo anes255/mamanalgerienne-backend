@@ -339,12 +339,8 @@ async function connectToAtlas() {
     console.log('🔌 Using connection string with cluster0.iqodm96.mongodb.net');
     
     await mongoose.connect(MONGODB_URI, {
-      useNewUrlParser: true,
-      useUnifiedTopology: true,
       serverSelectionTimeoutMS: 30000, // 30 seconds
-      socketTimeoutMS: 45000, // 45 seconds
-      bufferCommands: false,
-      bufferMaxEntries: 0
+      socketTimeoutMS: 45000 // 45 seconds
     });
     
     console.log('✅ Connected to MongoDB Atlas successfully');
