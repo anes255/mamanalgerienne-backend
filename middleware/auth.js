@@ -27,8 +27,8 @@ const auth = async (req, res, next) => {
       });
     }
 
-    // Check if user account is active
-    if (user.status !== 'active') {
+    // Check if user account is active (if status field exists)
+    if (user.status && user.status !== 'active') {
       return res.status(403).json({ 
         message: 'تم تعليق هذا الحساب',
         code: 'ACCOUNT_SUSPENDED'
@@ -37,6 +37,7 @@ const auth = async (req, res, next) => {
 
     // Attach user to request
     req.user = user;
+    req.userId = user._id; // Also set userId for compatibility
     next();
 
   } catch (error) {
@@ -71,6 +72,7 @@ const optionalAuth = async (req, res, next) => {
     if (!token) {
       // No token provided, continue without user
       req.user = null;
+      req.userId = null;
       return next();
     }
 
@@ -78,10 +80,12 @@ const optionalAuth = async (req, res, next) => {
     const decoded = jwt.verify(token, JWT_SECRET);
     const user = await User.findById(decoded.userId);
 
-    if (user && user.status === 'active') {
+    if (user && (!user.status || user.status === 'active')) {
       req.user = user;
+      req.userId = user._id;
     } else {
       req.user = null;
+      req.userId = null;
     }
 
     next();
@@ -89,37 +93,72 @@ const optionalAuth = async (req, res, next) => {
   } catch (error) {
     // If token verification fails, continue without user
     req.user = null;
+    req.userId = null;
     next();
   }
 };
 
-// Admin auth middleware
+// Admin auth middleware - FIXED VERSION
 const adminAuth = async (req, res, next) => {
   try {
-    // First run the regular auth middleware
-    await new Promise((resolve, reject) => {
-      auth(req, res, (err) => {
-        if (err) reject(err);
-        else resolve();
+    const token = req.header('Authorization')?.replace('Bearer ', '');
+
+    if (!token) {
+      return res.status(401).json({ 
+        message: 'لا يوجد رمز مصادقة، الوصول مرفوض',
+        code: 'NO_TOKEN'
       });
-    });
+    }
+
+    // Verify token
+    const decoded = jwt.verify(token, JWT_SECRET);
+    const user = await User.findById(decoded.userId);
+
+    if (!user) {
+      return res.status(401).json({ 
+        message: 'رمز المصادقة غير صالح',
+        code: 'INVALID_TOKEN'
+      });
+    }
+
+    // Check if user account is active
+    if (user.status && user.status !== 'active') {
+      return res.status(403).json({ 
+        message: 'تم تعليق هذا الحساب',
+        code: 'ACCOUNT_SUSPENDED'
+      });
+    }
 
     // Check if user is admin
-    if (!req.user.isAdmin) {
+    if (!user.isAdmin) {
       return res.status(403).json({ 
         message: 'هذا الإجراء مخصص للمديرين فقط',
         code: 'ADMIN_REQUIRED'
       });
     }
 
+    // Attach user to request
+    req.user = user;
+    req.userId = user._id;
     next();
 
   } catch (error) {
-    // If auth middleware failed, pass the error through
-    if (error.status) {
-      return res.status(error.status).json(error.body);
+    console.error('Admin auth middleware error:', error);
+
+    if (error.name === 'JsonWebTokenError') {
+      return res.status(401).json({ 
+        message: 'رمز المصادقة غير صالح',
+        code: 'INVALID_TOKEN'
+      });
     }
-    
+
+    if (error.name === 'TokenExpiredError') {
+      return res.status(401).json({ 
+        message: 'انتهت صلاحية رمز المصادقة',
+        code: 'TOKEN_EXPIRED'
+      });
+    }
+
     res.status(500).json({ 
       message: 'خطأ في التحقق من صلاحيات الإدارة',
       code: 'ADMIN_AUTH_ERROR'
@@ -131,13 +170,28 @@ const adminAuth = async (req, res, next) => {
 const ownerOrAdmin = (getResourceOwnerId) => {
   return async (req, res, next) => {
     try {
-      // First run auth middleware
-      await new Promise((resolve, reject) => {
-        auth(req, res, (err) => {
-          if (err) reject(err);
-          else resolve();
+      const token = req.header('Authorization')?.replace('Bearer ', '');
+
+      if (!token) {
+        return res.status(401).json({ 
+          message: 'لا يوجد رمز مصادقة، الوصول مرفوض',
+          code: 'NO_TOKEN'
         });
-      });
+      }
+
+      // Verify token
+      const decoded = jwt.verify(token, JWT_SECRET);
+      const user = await User.findById(decoded.userId);
+
+      if (!user) {
+        return res.status(401).json({ 
+          message: 'رمز المصادقة غير صالح',
+          code: 'INVALID_TOKEN'
+        });
+      }
+
+      req.user = user;
+      req.userId = user._id;
 
       const resourceOwnerId = getResourceOwnerId(req);
       const userId = req.user._id.toString();
@@ -153,6 +207,7 @@ const ownerOrAdmin = (getResourceOwnerId) => {
       });
 
     } catch (error) {
+      console.error('Owner or admin auth error:', error);
       res.status(500).json({ 
         message: 'خطأ في التحقق من الصلاحيات',
         code: 'PERMISSION_ERROR'
