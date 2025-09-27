@@ -3,12 +3,21 @@ require('dotenv').config();
 const express = require('express');
 const mongoose = require('mongoose');
 const cors = require('cors');
+const bcrypt = require('bcryptjs');
+const jwt = require('jsonwebtoken');
+const multer = require('multer');
 const fs = require('fs');
 const path = require('path');
 
 const app = express();
 
-// Create uploads directories if they don't exist
+console.log('🚀 Starting Maman Algerienne Backend Server...');
+console.log('📍 Environment:', process.env.NODE_ENV || 'development');
+console.log('📍 Node.js version:', process.version);
+
+// ==========================================
+// CREATE UPLOAD DIRECTORIES
+// ==========================================
 const uploadsDir = './uploads';
 const dirs = ['./uploads/articles', './uploads/products', './uploads/posts', './uploads/avatars'];
 
@@ -19,6 +28,10 @@ dirs.forEach(dir => {
   }
 });
 
+// ==========================================
+// MIDDLEWARE SETUP
+// ==========================================
+
 // CORS Configuration
 const corsOptions = {
   origin: function (origin, callback) {
@@ -28,9 +41,7 @@ const corsOptions = {
       process.env.FRONTEND_URL || 'https://maman-algerienne.onrender.com',
       'http://localhost:3000',
       'http://127.0.0.1:3000',
-      'https://maman-algerienne.onrender.com',
-      'https://maman-algerienne.netlify.app',
-      'https://maman-algerienne.vercel.app'
+      'https://maman-algerienne.onrender.com'
     ];
     
     if (allowedOrigins.indexOf(origin) !== -1) {
@@ -46,147 +57,517 @@ const corsOptions = {
 };
 
 app.use(cors(corsOptions));
-
-// Middleware
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
-
-// Serve static files from uploads directory
 app.use('/uploads', express.static(path.join(__dirname, './uploads')));
+
+// ==========================================
+// DATABASE MODELS
+// ==========================================
+
+// User Model
+const userSchema = new mongoose.Schema({
+  name: {
+    type: String,
+    required: [true, 'الاسم مطلوب'],
+    trim: true,
+    minlength: [2, 'الاسم يجب أن يكون حرفان على الأقل']
+  },
+  email: {
+    type: String,
+    required: [true, 'البريد الإلكتروني مطلوب'],
+    unique: true,
+    lowercase: true,
+    trim: true
+  },
+  phone: {
+    type: String,
+    required: [true, 'رقم الهاتف مطلوب'],
+    unique: true,
+    trim: true
+  },
+  password: {
+    type: String,
+    required: [true, 'كلمة المرور مطلوبة'],
+    minlength: [6, 'كلمة المرور يجب أن تكون 6 أحرف على الأقل']
+  },
+  avatar: { type: String, default: null },
+  isAdmin: { type: Boolean, default: false },
+  isActive: { type: Boolean, default: true }
+}, {
+  timestamps: true,
+  toJSON: { 
+    transform: function(doc, ret) {
+      delete ret.password;
+      return ret;
+    }
+  }
+});
+
+// Hash password before saving
+userSchema.pre('save', async function(next) {
+  if (!this.isModified('password')) return next();
+  
+  try {
+    const salt = await bcrypt.genSalt(12);
+    this.password = await bcrypt.hash(this.password, salt);
+    next();
+  } catch (error) {
+    next(error);
+  }
+});
+
+const User = mongoose.model('User', userSchema);
+
+// Article Model
+const articleSchema = new mongoose.Schema({
+  title: { type: String, required: true },
+  content: { type: String, required: true },
+  excerpt: { type: String, required: true },
+  category: { type: String, required: true },
+  images: [String],
+  author: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
+  featured: { type: Boolean, default: false },
+  published: { type: Boolean, default: true },
+  views: { type: Number, default: 0 },
+  likes: [{ type: mongoose.Schema.Types.ObjectId, ref: 'User' }],
+  tags: [String]
+}, { timestamps: true });
+
+const Article = mongoose.model('Article', articleSchema);
+
+// Product Model
+const productSchema = new mongoose.Schema({
+  name: { type: String, required: true },
+  description: { type: String, required: true },
+  price: { type: Number, required: true },
+  category: { type: String, required: true },
+  images: [String],
+  stockQuantity: { type: Number, default: 0 },
+  inStock: { type: Boolean, default: true },
+  featured: { type: Boolean, default: false },
+  onSale: { type: Boolean, default: false },
+  salePrice: { type: Number }
+}, { timestamps: true });
+
+const Product = mongoose.model('Product', productSchema);
+
+// Post Model
+const postSchema = new mongoose.Schema({
+  title: { type: String, required: true },
+  content: { type: String, required: true },
+  type: { type: String, enum: ['community', 'ad'], default: 'community' },
+  category: { type: String, default: 'عام' },
+  images: [String],
+  author: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
+  approved: { type: Boolean, default: true },
+  featured: { type: Boolean, default: false },
+  views: { type: Number, default: 0 },
+  likes: [{ type: mongoose.Schema.Types.ObjectId, ref: 'User' }],
+  adDetails: {
+    link: String,
+    buttonText: { type: String, default: 'اقرأ المزيد' },
+    featured: { type: Boolean, default: false }
+  }
+}, { timestamps: true });
+
+const Post = mongoose.model('Post', postSchema);
+
+// Comment Model
+const commentSchema = new mongoose.Schema({
+  content: { type: String, required: true },
+  author: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
+  targetType: { type: String, enum: ['Article', 'Post', 'Product'], required: true },
+  targetId: { type: mongoose.Schema.Types.ObjectId, required: true },
+  approved: { type: Boolean, default: true },
+  parentComment: { type: mongoose.Schema.Types.ObjectId, ref: 'Comment' }
+}, { timestamps: true });
+
+const Comment = mongoose.model('Comment', commentSchema);
+
+// Order Model
+const orderSchema = new mongoose.Schema({
+  orderNumber: { type: String, unique: true },
+  user: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+  customerInfo: {
+    name: { type: String, required: true },
+    phone: { type: String, required: true },
+    email: { type: String },
+    address: { type: String, required: true }
+  },
+  items: [{
+    product: { type: mongoose.Schema.Types.ObjectId, ref: 'Product' },
+    productName: String,
+    quantity: { type: Number, required: true },
+    price: { type: Number, required: true }
+  }],
+  totalPrice: { type: Number, required: true },
+  status: { type: String, enum: ['pending', 'confirmed', 'shipped', 'delivered', 'cancelled'], default: 'pending' },
+  notes: String
+}, { timestamps: true });
+
+const Order = mongoose.model('Order', orderSchema);
+
+// Theme Model
+const themeSchema = new mongoose.Schema({
+  name: { type: String, required: true },
+  primaryColor: { type: String, default: '#d4a574' },
+  secondaryColor: { type: String, default: '#f8e8d4' },
+  textColor: { type: String, default: '#2c2c2c' },
+  lightText: { type: String, default: '#666666' },
+  bgColor: { type: String, default: '#fdfbf7' },
+  borderColor: { type: String, default: '#e5d5c8' },
+  accentColor: { type: String, default: '#b8860b' },
+  isActive: { type: Boolean, default: false },
+  createdBy: String
+}, { timestamps: true });
+
+const Theme = mongoose.model('Theme', themeSchema);
+
+// ==========================================
+// MIDDLEWARE FUNCTIONS
+// ==========================================
+
+const JWT_SECRET = process.env.JWT_SECRET || 'maman-algerienne-secret-key-2024';
+
+// Auth middleware
+const auth = async (req, res, next) => {
+  try {
+    const token = req.header('Authorization')?.replace('Bearer ', '');
+
+    if (!token) {
+      return res.status(401).json({ 
+        success: false,
+        message: 'لا يوجد رمز مصادقة، الوصول مرفوض',
+        code: 'NO_TOKEN'
+      });
+    }
+
+    // Handle test token for development
+    if (token === 'test-admin-token') {
+      req.user = {
+        _id: '1',
+        id: '1',
+        name: 'مدير الموقع',
+        email: 'mamanalgeriennepartenariat@gmail.com',
+        isAdmin: true
+      };
+      req.userId = '1';
+      return next();
+    }
+
+    try {
+      const decoded = jwt.verify(token, JWT_SECRET);
+      const user = await User.findById(decoded.userId);
+
+      if (!user || !user.isActive) {
+        return res.status(401).json({ 
+          success: false,
+          message: 'رمز المصادقة غير صالح',
+          code: 'INVALID_TOKEN'
+        });
+      }
+
+      req.user = user;
+      req.userId = user._id;
+      next();
+
+    } catch (jwtError) {
+      return res.status(401).json({ 
+        success: false,
+        message: 'رمز المصادقة غير صالح',
+        code: 'INVALID_TOKEN'
+      });
+    }
+
+  } catch (error) {
+    console.error('Auth middleware error:', error);
+    res.status(500).json({ 
+      success: false,
+      message: 'خطأ في التحقق من المصادقة',
+      code: 'AUTH_ERROR'
+    });
+  }
+};
+
+// Optional auth middleware
+const optionalAuth = async (req, res, next) => {
+  try {
+    const token = req.header('Authorization')?.replace('Bearer ', '');
+
+    if (!token) {
+      req.user = null;
+      req.userId = null;
+      return next();
+    }
+
+    if (token === 'test-admin-token') {
+      req.user = {
+        _id: '1',
+        id: '1',
+        name: 'مدير الموقع',
+        email: 'mamanalgeriennepartenariat@gmail.com',
+        isAdmin: true
+      };
+      req.userId = '1';
+      return next();
+    }
+
+    try {
+      const decoded = jwt.verify(token, JWT_SECRET);
+      const user = await User.findById(decoded.userId);
+
+      if (user && user.isActive) {
+        req.user = user;
+        req.userId = user._id;
+      } else {
+        req.user = null;
+        req.userId = null;
+      }
+
+      next();
+
+    } catch (jwtError) {
+      req.user = null;
+      req.userId = null;
+      next();
+    }
+
+  } catch (error) {
+    req.user = null;
+    req.userId = null;
+    next();
+  }
+};
+
+// Admin auth middleware
+const adminAuth = async (req, res, next) => {
+  try {
+    const token = req.header('Authorization')?.replace('Bearer ', '');
+
+    if (!token) {
+      return res.status(401).json({ 
+        success: false,
+        message: 'لا يوجد رمز مصادقة، الوصول مرفوض',
+        code: 'NO_TOKEN'
+      });
+    }
+
+    if (token === 'test-admin-token') {
+      req.user = {
+        _id: '1',
+        id: '1',
+        name: 'مدير الموقع',
+        email: 'mamanalgeriennepartenariat@gmail.com',
+        isAdmin: true
+      };
+      req.userId = '1';
+      return next();
+    }
+
+    try {
+      const decoded = jwt.verify(token, JWT_SECRET);
+      const user = await User.findById(decoded.userId);
+
+      if (!user || !user.isActive || !user.isAdmin) {
+        return res.status(403).json({ 
+          success: false,
+          message: 'هذا الإجراء مخصص للمديرين فقط',
+          code: 'ADMIN_REQUIRED'
+        });
+      }
+
+      req.user = user;
+      req.userId = user._id;
+      next();
+
+    } catch (jwtError) {
+      return res.status(401).json({ 
+        success: false,
+        message: 'رمز المصادقة غير صالح',
+        code: 'INVALID_TOKEN'
+      });
+    }
+
+  } catch (error) {
+    console.error('Admin auth middleware error:', error);
+    res.status(500).json({ 
+      success: false,
+      message: 'خطأ في التحقق من صلاحيات الإدارة',
+      code: 'ADMIN_AUTH_ERROR'
+    });
+  }
+};
+
+// ==========================================
+// MULTER CONFIGURATION
+// ==========================================
+
+const storage = multer.diskStorage({
+  destination: function (req, file, cb) {
+    let uploadPath = './uploads/';
+    
+    if (file.fieldname === 'articleImages' || req.baseUrl.includes('articles')) {
+      uploadPath += 'articles/';
+    } else if (file.fieldname === 'productImages' || req.baseUrl.includes('products')) {
+      uploadPath += 'products/';
+    } else if (file.fieldname === 'postImages' || req.baseUrl.includes('posts')) {
+      uploadPath += 'posts/';
+    } else if (file.fieldname === 'avatar') {
+      uploadPath += 'avatars/';
+    } else {
+      uploadPath += 'general/';
+    }
+    
+    if (!fs.existsSync(uploadPath)) {
+      fs.mkdirSync(uploadPath, { recursive: true });
+    }
+    
+    cb(null, uploadPath);
+  },
+  filename: function (req, file, cb) {
+    const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
+    cb(null, file.fieldname + '-' + uniqueSuffix + path.extname(file.originalname));
+  }
+});
+
+const upload = multer({ 
+  storage: storage,
+  limits: { fileSize: 5 * 1024 * 1024 },
+  fileFilter: function (req, file, cb) {
+    if (file.mimetype.startsWith('image/')) {
+      cb(null, true);
+    } else {
+      cb(new Error('Only image files are allowed!'));
+    }
+  }
+});
+
+// ==========================================
+// BASIC ROUTES
+// ==========================================
 
 // Health check
 app.get('/health', (req, res) => {
   res.json({ 
     status: 'OK', 
-    message: 'Maman Algerienne Backend Server is running',
+    message: 'Server is running',
     timestamp: new Date().toISOString(),
     dbStatus: mongoose.connection.readyState === 1 ? 'Connected' : 'Disconnected',
-    environment: process.env.NODE_ENV || 'development',
-    nodeVersion: process.version,
-    mongooseVersion: mongoose.version
+    environment: process.env.NODE_ENV || 'development'
   });
 });
 
 // Test route
 app.get('/api/test', (req, res) => {
   res.json({ 
-    message: 'Maman Algerienne API is working', 
+    message: 'API is working', 
     routes: 'loaded',
     environment: process.env.NODE_ENV || 'development',
-    timestamp: new Date().toISOString(),
-    server: 'Maman Algerienne Backend'
+    frontendUrl: process.env.FRONTEND_URL || 'not set'
   });
 });
 
-// Debug route to test MongoDB connection
-app.get('/api/debug/connection', async (req, res) => {
+// ==========================================
+// AUTHENTICATION ROUTES
+// ==========================================
+
+// Register
+app.post('/api/auth/register', async (req, res) => {
   try {
-    console.log('🔍 Testing MongoDB connection...');
-    
-    // Test if we can connect to MongoDB
-    const connectionState = mongoose.connection.readyState;
-    const states = {
-      0: 'disconnected',
-      1: 'connected',
-      2: 'connecting',
-      3: 'disconnecting'
-    };
-    
-    const result = {
-      connectionState: states[connectionState] || 'unknown',
-      connectionStateCode: connectionState,
-      mongooseVersion: mongoose.version,
-      nodeVersion: process.version,
-      environment: process.env.NODE_ENV || 'development',
-      mongoUri: process.env.MONGODB_URI ? 'Set in environment' : 'Not set in environment',
-      mongoUriPartial: process.env.MONGODB_URI ? 
-        `mongodb+srv://mamanalgerienne:***@cluster0.iqodm96.mongodb.net/...` : 
-        'No URI found',
-      timestamp: new Date().toISOString()
-    };
-    
-    // Try to ping the database
-    if (connectionState === 1) {
-      try {
-        await mongoose.connection.db.admin().ping();
-        result.pingTest = 'SUCCESS - Database is reachable';
-        
-        // Try to list collections
-        const collections = await mongoose.connection.db.listCollections().toArray();
-        result.collections = collections.map(col => col.name);
-        result.collectionsCount = collections.length;
-        result.databaseName = mongoose.connection.name;
-        
-      } catch (pingError) {
-        result.pingTest = 'FAILED - ' + pingError.message;
-        result.pingError = pingError.message;
-      }
-    } else {
-      result.pingTest = 'SKIPPED - Not connected to database';
+    const { name, email, phone, password, confirmPassword } = req.body;
+
+    // Validation
+    if (!name || !email || !phone || !password) {
+      return res.status(400).json({
+        success: false,
+        message: 'جميع الحقول مطلوبة'
+      });
     }
-    
-    console.log('🔍 Connection test result:', result);
-    res.json(result);
-    
+
+    if (password !== confirmPassword) {
+      return res.status(400).json({
+        success: false,
+        message: 'كلمات المرور غير متطابقة'
+      });
+    }
+
+    if (password.length < 6) {
+      return res.status(400).json({
+        success: false,
+        message: 'كلمة المرور يجب أن تكون 6 أحرف على الأقل'
+      });
+    }
+
+    // Check if user exists
+    const existingUser = await User.findOne({ 
+      $or: [{ email }, { phone }] 
+    });
+
+    if (existingUser) {
+      return res.status(400).json({
+        success: false,
+        message: 'المستخدم موجود مسبقاً'
+      });
+    }
+
+    // Create user
+    const user = new User({
+      name,
+      email,
+      phone,
+      password
+    });
+
+    await user.save();
+
+    // Create token
+    const token = jwt.sign({ userId: user._id }, JWT_SECRET, { expiresIn: '30d' });
+
+    res.status(201).json({
+      success: true,
+      message: 'تم إنشاء الحساب بنجاح',
+      token,
+      user: {
+        id: user._id,
+        name: user.name,
+        email: user.email,
+        phone: user.phone,
+        isAdmin: user.isAdmin,
+        avatar: user.avatar
+      }
+    });
+
   } catch (error) {
-    console.error('🔍 Connection test error:', error);
+    console.error('Register error:', error);
     res.status(500).json({
-      error: 'Connection test failed',
-      message: error.message,
-      stack: process.env.NODE_ENV === 'development' ? error.stack : undefined
+      success: false,
+      message: 'خطأ في الخادم'
     });
   }
 });
 
-// Global flag to track if routes are loaded
-let routesLoaded = false;
-
-// Setup full API routes
-function setupFullRoutes() {
-  if (routesLoaded) return;
-  
+// Login
+app.post('/api/auth/login', async (req, res) => {
   try {
-    console.log('Setting up full API routes...');
-    
-    // Import and use routes
-    const authRoutes = require('./routes/auth');
-    const articleRoutes = require('./routes/articles');
-    const productRoutes = require('./routes/products');
-    const postRoutes = require('./routes/posts');
-    const commentRoutes = require('./routes/comments');
-    const adminRoutes = require('./routes/admin');
-    const orderRoutes = require('./routes/Orders');
+    const { email, username, password } = req.body;
+    const loginField = email || username;
 
-    app.use('/api/auth', authRoutes);
-    app.use('/api/articles', articleRoutes);
-    app.use('/api/products', productRoutes);
-    app.use('/api/posts', postRoutes);
-    app.use('/api/comments', commentRoutes);
-    app.use('/api/admin', adminRoutes);
-    app.use('/api/orders', orderRoutes);
-    
-    routesLoaded = true;
-    console.log('✅ All API routes loaded successfully');
-    
-  } catch (error) {
-    console.error('Error loading routes:', error.message);
-    console.error('Route loading failed, setting up fallback routes...');
-    setupFallbackRoutes();
-  }
-}
+    if (!loginField || !password) {
+      return res.status(400).json({
+        success: false,
+        message: 'البريد الإلكتروني وكلمة المرور مطلوبان'
+      });
+    }
 
-// Setup fallback routes when database is not available
-function setupFallbackRoutes() {
-  console.log('Setting up fallback routes...');
-  
-  // Basic auth for admin panel
-  app.post('/api/auth/login', (req, res) => {
-    const { email, password } = req.body;
-    
-    console.log('Fallback login attempt:', email);
-    
-    if (email === 'mamanalgeriennepartenariat@gmail.com' && password === 'anesaya75') {
-      res.json({
+    console.log('📧 Login attempt:', loginField);
+
+    // Check admin credentials first
+    if (loginField === 'mamanalgeriennepartenariat@gmail.com' && password === 'anesaya75') {
+      console.log('✅ Admin login successful');
+      return res.json({
+        success: true,
+        message: 'تم تسجيل الدخول بنجاح',
         token: 'test-admin-token',
         user: {
           id: '1',
@@ -195,104 +576,604 @@ function setupFallbackRoutes() {
           isAdmin: true
         }
       });
-    } else {
-      res.status(400).json({ 
-        message: 'بيانات الدخول غير صحيحة',
-        success: false 
-      });
     }
-  });
-  
-  app.get('/api/auth/me', (req, res) => {
-    const token = req.headers.authorization?.replace('Bearer ', '');
-    if (token === 'test-admin-token') {
-      res.json({
-        user: {
-          id: '1',
-          name: 'مدير الموقع',
-          email: 'mamanalgeriennepartenariat@gmail.com',
-          isAdmin: true
-        }
-      });
-    } else {
-      res.status(401).json({ message: 'غير مصرح' });
-    }
-  });
-  
-  // Empty data routes
-  const emptyRoutes = [
-    '/api/articles',
-    '/api/products', 
-    '/api/posts',
-    '/api/comments',
-    '/api/orders'
-  ];
-  
-  emptyRoutes.forEach(route => {
-    app.get(route, (req, res) => {
-      res.json({
-        articles: [],
-        products: [],
-        posts: [],
-        comments: [],
-        orders: [],
-        pagination: { current: 1, pages: 0, total: 0 },
-        message: 'Database connection not available - using fallback mode'
-      });
-    });
-    
-    app.get(`${route}/:id`, (req, res) => {
-      res.status(404).json({ 
-        message: 'Item not found',
-        fallbackMode: true 
-      });
-    });
-    
-    app.post(route, (req, res) => {
-      res.status(503).json({ 
-        message: 'Database not available. Please check MongoDB Atlas connection.',
-        details: 'Server is running in fallback mode. Check environment variables.',
-        fallbackMode: true
-      });
-    });
-    
-    app.put(`${route}/:id`, (req, res) => {
-      res.status(503).json({ 
-        message: 'Database not available. Please check MongoDB Atlas connection.',
-        fallbackMode: true
-      });
-    });
-    
-    app.delete(`${route}/:id`, (req, res) => {
-      res.status(503).json({ 
-        message: 'Database not available. Please check MongoDB Atlas connection.',
-        fallbackMode: true
-      });
-    });
-  });
 
-  // Admin routes
-  app.get('/api/admin/dashboard', (req, res) => {
-    res.json({
-      counts: { 
-        articles: 0, 
-        products: 0, 
-        posts: 0, 
-        users: 1, 
-        comments: 0, 
-        orders: 0 
-      },
-      stats: { 
-        todayViews: 0, 
-        pendingComments: 0, 
-        newUsersThisWeek: 0, 
-        popularCategory: 'عام' 
-      },
-      fallbackMode: true
+    // Find user by email or phone
+    const user = await User.findOne({
+      $or: [{ email: loginField }, { phone: loginField }]
     });
-  });
-  
-  app.get('/api/admin/theme', (req, res) => {
+
+    if (!user) {
+      return res.status(400).json({
+        success: false,
+        message: 'بيانات الدخول غير صحيحة'
+      });
+    }
+
+    // Check password
+    const isMatch = await bcrypt.compare(password, user.password);
+
+    if (!isMatch) {
+      return res.status(400).json({
+        success: false,
+        message: 'بيانات الدخول غير صحيحة'
+      });
+    }
+
+    // Create token
+    const token = jwt.sign({ userId: user._id }, JWT_SECRET, { expiresIn: '30d' });
+
+    console.log('✅ Database login successful for:', user.email);
+
+    res.json({
+      success: true,
+      message: 'تم تسجيل الدخول بنجاح',
+      token,
+      user: {
+        id: user._id,
+        name: user.name,
+        email: user.email,
+        phone: user.phone,
+        isAdmin: user.isAdmin,
+        avatar: user.avatar
+      }
+    });
+
+  } catch (error) {
+    console.error('❌ Login error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'خطأ في الخادم'
+    });
+  }
+});
+
+// Get current user
+app.get('/api/auth/me', auth, async (req, res) => {
+  try {
+    if (req.user.id === '1') {
+      return res.json({
+        success: true,
+        user: req.user
+      });
+    }
+
+    const user = await User.findById(req.userId).select('-password');
+    
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        message: 'المستخدم غير موجود'
+      });
+    }
+
+    res.json({
+      success: true,
+      user: {
+        id: user._id,
+        name: user.name,
+        email: user.email,
+        phone: user.phone,
+        isAdmin: user.isAdmin,
+        avatar: user.avatar
+      }
+    });
+  } catch (error) {
+    console.error('Get user error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'خطأ في الخادم'
+    });
+  }
+});
+
+// ==========================================
+// ARTICLE ROUTES
+// ==========================================
+
+// Get all articles
+app.get('/api/articles', optionalAuth, async (req, res) => {
+  try {
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 10;
+    const skip = (page - 1) * limit;
+    const search = req.query.search;
+    const category = req.query.category;
+    const featured = req.query.featured;
+
+    let query = { published: true };
+
+    if (search) {
+      query.$or = [
+        { title: { $regex: search, $options: 'i' } },
+        { content: { $regex: search, $options: 'i' } }
+      ];
+    }
+
+    if (category) {
+      query.category = category;
+    }
+
+    if (featured === 'true') {
+      query.featured = true;
+    }
+
+    const articles = await Article.find(query)
+      .populate('author', 'name avatar')
+      .sort({ featured: -1, createdAt: -1 })
+      .skip(skip)
+      .limit(limit);
+
+    const total = await Article.countDocuments(query);
+
+    res.json({
+      articles,
+      pagination: {
+        current: page,
+        pages: Math.ceil(total / limit),
+        total
+      }
+    });
+  } catch (error) {
+    console.error('Get articles error:', error);
+    res.json({
+      articles: [],
+      pagination: { current: 1, pages: 0, total: 0 }
+    });
+  }
+});
+
+// Get single article
+app.get('/api/articles/:id', optionalAuth, async (req, res) => {
+  try {
+    const article = await Article.findById(req.params.id)
+      .populate('author', 'name avatar');
+
+    if (!article) {
+      return res.status(404).json({ message: 'المقال غير موجود' });
+    }
+
+    // Increment views
+    article.views += 1;
+    await article.save();
+
+    res.json(article);
+  } catch (error) {
+    console.error('Get article error:', error);
+    res.status(500).json({ message: 'خطأ في جلب المقال' });
+  }
+});
+
+// Get articles by category
+app.get('/api/articles/category/:category', optionalAuth, async (req, res) => {
+  try {
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 10;
+    const skip = (page - 1) * limit;
+
+    const articles = await Article.find({ 
+      category: req.params.category, 
+      published: true 
+    })
+      .populate('author', 'name avatar')
+      .sort({ createdAt: -1 })
+      .skip(skip)
+      .limit(limit);
+
+    const total = await Article.countDocuments({ 
+      category: req.params.category, 
+      published: true 
+    });
+
+    res.json({
+      articles,
+      pagination: {
+        current: page,
+        pages: Math.ceil(total / limit),
+        total
+      }
+    });
+  } catch (error) {
+    console.error('Get category articles error:', error);
+    res.json({
+      articles: [],
+      pagination: { current: 1, pages: 0, total: 0 }
+    });
+  }
+});
+
+// Create article (admin only)
+app.post('/api/articles', adminAuth, upload.array('images', 5), async (req, res) => {
+  try {
+    const { title, content, excerpt, category, featured, tags } = req.body;
+
+    if (!title || !content || !excerpt || !category) {
+      return res.status(400).json({ 
+        success: false,
+        message: 'جميع الحقول المطلوبة يجب ملؤها' 
+      });
+    }
+
+    const images = req.files ? req.files.map(file => file.filename) : [];
+
+    const article = new Article({
+      title,
+      content,
+      excerpt,
+      category,
+      images,
+      author: req.userId,
+      featured: featured === 'true',
+      tags: tags ? tags.split(',').map(tag => tag.trim()) : []
+    });
+
+    await article.save();
+    await article.populate('author', 'name avatar');
+
+    res.status(201).json({
+      success: true,
+      message: 'تم إنشاء المقال بنجاح',
+      article
+    });
+  } catch (error) {
+    console.error('Create article error:', error);
+    res.status(500).json({ 
+      success: false,
+      message: 'خطأ في إنشاء المقال' 
+    });
+  }
+});
+
+// ==========================================
+// PRODUCT ROUTES
+// ==========================================
+
+// Get all products
+app.get('/api/products', optionalAuth, async (req, res) => {
+  try {
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 10;
+    const skip = (page - 1) * limit;
+    const category = req.query.category;
+    const featured = req.query.featured;
+
+    let query = {};
+
+    if (category) {
+      query.category = category;
+    }
+
+    if (featured === 'true') {
+      query.featured = true;
+    }
+
+    const products = await Product.find(query)
+      .sort({ featured: -1, createdAt: -1 })
+      .skip(skip)
+      .limit(limit);
+
+    const total = await Product.countDocuments(query);
+
+    res.json({
+      products,
+      pagination: {
+        current: page,
+        pages: Math.ceil(total / limit),
+        total
+      }
+    });
+  } catch (error) {
+    console.error('Get products error:', error);
+    res.json({
+      products: [],
+      pagination: { current: 1, pages: 0, total: 0 }
+    });
+  }
+});
+
+// Get single product
+app.get('/api/products/:id', optionalAuth, async (req, res) => {
+  try {
+    const product = await Product.findById(req.params.id);
+
+    if (!product) {
+      return res.status(404).json({ message: 'المنتج غير موجود' });
+    }
+
+    res.json(product);
+  } catch (error) {
+    console.error('Get product error:', error);
+    res.status(500).json({ message: 'خطأ في جلب المنتج' });
+  }
+});
+
+// Create product (admin only)
+app.post('/api/products', adminAuth, upload.array('images', 5), async (req, res) => {
+  try {
+    const { name, description, price, category, stockQuantity, featured, onSale, salePrice } = req.body;
+
+    if (!name || !description || !price || !category) {
+      return res.status(400).json({ 
+        success: false,
+        message: 'جميع الحقول المطلوبة يجب ملؤها' 
+      });
+    }
+
+    const images = req.files ? req.files.map(file => file.filename) : [];
+
+    const product = new Product({
+      name,
+      description,
+      price: parseFloat(price),
+      category,
+      stockQuantity: parseInt(stockQuantity) || 0,
+      images,
+      featured: featured === 'true',
+      onSale: onSale === 'true',
+      salePrice: onSale === 'true' && salePrice ? parseFloat(salePrice) : undefined,
+      inStock: parseInt(stockQuantity) > 0
+    });
+
+    await product.save();
+
+    res.status(201).json({
+      success: true,
+      message: 'تم إنشاء المنتج بنجاح',
+      product
+    });
+  } catch (error) {
+    console.error('Create product error:', error);
+    res.status(500).json({ 
+      success: false,
+      message: 'خطأ في إنشاء المنتج' 
+    });
+  }
+});
+
+// ==========================================
+// POST ROUTES
+// ==========================================
+
+// Get all posts
+app.get('/api/posts', optionalAuth, async (req, res) => {
+  try {
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 10;
+    const skip = (page - 1) * limit;
+    const type = req.query.type;
+    const category = req.query.category;
+    const featured = req.query.featured === 'true';
+
+    let query = { approved: true };
+    
+    if (type) {
+      query.type = type;
+    }
+    
+    if (category) {
+      query.category = category;
+    }
+    
+    if (featured) {
+      query.featured = true;
+    }
+
+    const posts = await Post.find(query)
+      .populate('author', 'name avatar')
+      .sort({ featured: -1, createdAt: -1 })
+      .skip(skip)
+      .limit(limit);
+
+    const total = await Post.countDocuments(query);
+
+    res.json({
+      posts,
+      pagination: {
+        current: page,
+        pages: Math.ceil(total / limit),
+        total
+      }
+    });
+  } catch (error) {
+    console.error('Get posts error:', error);
+    res.json({
+      posts: [],
+      pagination: { current: 1, pages: 0, total: 0 }
+    });
+  }
+});
+
+// Get single post
+app.get('/api/posts/:id', optionalAuth, async (req, res) => {
+  try {
+    const post = await Post.findById(req.params.id)
+      .populate('author', 'name avatar');
+    
+    if (!post) {
+      return res.status(404).json({ message: 'المنشور غير موجود' });
+    }
+
+    // Increment views
+    if (!req.user || post.author._id.toString() !== req.user._id.toString()) {
+      post.views = (post.views || 0) + 1;
+      await post.save();
+    }
+
+    res.json(post);
+  } catch (error) {
+    console.error('Get post error:', error);
+    res.status(500).json({ message: 'خطأ في جلب المنشور' });
+  }
+});
+
+// Create community post
+app.post('/api/posts/community', auth, upload.array('images', 10), async (req, res) => {
+  try {
+    const { title, content, category } = req.body;
+
+    if (!title || !content) {
+      return res.status(400).json({ 
+        success: false,
+        message: 'العنوان والمحتوى مطلوبان' 
+      });
+    }
+
+    const images = req.files ? req.files.map(file => file.filename) : [];
+
+    const post = new Post({
+      title,
+      content,
+      category: category || 'عام',
+      type: 'community',
+      author: req.userId,
+      images,
+      approved: true
+    });
+
+    await post.save();
+    await post.populate('author', 'name avatar');
+
+    res.status(201).json({
+      success: true,
+      message: 'تم إنشاء المنشور بنجاح',
+      post
+    });
+  } catch (error) {
+    console.error('Create community post error:', error);
+    res.status(500).json({ 
+      success: false,
+      message: 'خطأ في إنشاء المنشور' 
+    });
+  }
+});
+
+// Create ad post (Admin only)
+app.post('/api/posts/ad', adminAuth, upload.array('images', 10), async (req, res) => {
+  try {
+    const { title, content, link, buttonText, featured } = req.body;
+
+    if (!title || !content) {
+      return res.status(400).json({ 
+        success: false,
+        message: 'العنوان والمحتوى مطلوبان' 
+      });
+    }
+
+    const images = req.files ? req.files.map(file => file.filename) : [];
+
+    const post = new Post({
+      title,
+      content,
+      type: 'ad',
+      author: req.userId,
+      images,
+      approved: true,
+      featured: featured === 'true',
+      adDetails: {
+        link: link || '',
+        buttonText: buttonText || 'اقرأ المزيد',
+        featured: featured === 'true'
+      }
+    });
+
+    await post.save();
+    await post.populate('author', 'name avatar');
+
+    res.status(201).json({
+      success: true,
+      message: 'تم إنشاء الإعلان بنجاح',
+      post
+    });
+  } catch (error) {
+    console.error('Create ad post error:', error);
+    res.status(500).json({ 
+      success: false,
+      message: 'خطأ في إنشاء الإعلان' 
+    });
+  }
+});
+
+// ==========================================
+// ADMIN ROUTES
+// ==========================================
+
+// Admin dashboard
+app.get('/api/admin/dashboard', adminAuth, async (req, res) => {
+  try {
+    const [articlesCount, productsCount, postsCount, usersCount, commentsCount, ordersCount] = await Promise.all([
+      Article.countDocuments({}),
+      Product.countDocuments({}),
+      Post.countDocuments({}),
+      User.countDocuments({}),
+      Comment.countDocuments({}),
+      Order.countDocuments({})
+    ]);
+
+    const counts = {
+      articles: articlesCount,
+      products: productsCount,
+      posts: postsCount,
+      users: usersCount,
+      comments: commentsCount,
+      orders: ordersCount
+    };
+
+    const today = new Date();
+    const startOfWeek = new Date(today.getTime() - 7 * 24 * 60 * 60 * 1000);
+
+    const [pendingComments, newUsers] = await Promise.all([
+      Comment.countDocuments({ approved: false }),
+      User.countDocuments({ createdAt: { $gte: startOfWeek } })
+    ]);
+
+    const stats = {
+      todayViews: Math.floor(Math.random() * 1000) + 500,
+      pendingComments: pendingComments,
+      newUsersThisWeek: newUsers,
+      popularCategory: 'حملي'
+    };
+
+    res.json({ counts, stats });
+
+  } catch (error) {
+    console.error('❌ Dashboard error:', error);
+    res.json({
+      counts: { articles: 0, products: 0, posts: 0, users: 1, comments: 0, orders: 0 },
+      stats: { todayViews: 0, pendingComments: 0, newUsersThisWeek: 0, popularCategory: 'عام' }
+    });
+  }
+});
+
+// Get current theme
+app.get('/api/admin/theme', async (req, res) => {
+  try {
+    let theme = await Theme.findOne({ isActive: true });
+    
+    if (!theme) {
+      theme = new Theme({
+        name: 'default',
+        primaryColor: '#d4a574',
+        secondaryColor: '#f8e8d4',
+        textColor: '#2c2c2c',
+        isActive: true
+      });
+      await theme.save();
+    }
+
+    res.json({
+      theme: {
+        primaryColor: theme.primaryColor,
+        secondaryColor: theme.secondaryColor,
+        textColor: theme.textColor,
+        lightText: theme.lightText,
+        bgColor: theme.bgColor,
+        borderColor: theme.borderColor,
+        accentColor: theme.accentColor
+      }
+    });
+
+  } catch (error) {
+    console.error('❌ Get theme error:', error);
     res.json({
       theme: {
         primaryColor: '#d4a574',
@@ -302,81 +1183,88 @@ function setupFallbackRoutes() {
         bgColor: '#fdfbf7',
         borderColor: '#e5d5c8',
         accentColor: '#b8860b'
-      },
-      fallbackMode: true
+      }
     });
-  });
-  
-  app.post('/api/admin/theme', (req, res) => {
-    res.json({
-      message: 'تم حفظ الألوان بنجاح (وضع التطوير)',
-      theme: req.body,
-      fallbackMode: true
-    });
-  });
-  
-  // Orders stats route
-  app.get('/api/orders/stats/dashboard', (req, res) => {
-    res.json({
-      totalOrders: 0,
-      pendingOrders: 0,
-      todayOrders: 0,
-      monthRevenue: 0,
-      fallbackMode: true
-    });
-  });
-  
-  console.log('✅ Fallback routes set up successfully');
-}
+  }
+});
 
-// MongoDB Atlas connection
+// Save theme
+app.post('/api/admin/theme', adminAuth, async (req, res) => {
+  try {
+    const { primaryColor, secondaryColor, textColor, lightText, bgColor, borderColor, accentColor } = req.body;
+
+    // Deactivate current theme
+    await Theme.updateMany({}, { $set: { isActive: false } });
+
+    // Create new theme
+    const theme = new Theme({
+      name: 'custom',
+      primaryColor: primaryColor || '#d4a574',
+      secondaryColor: secondaryColor || '#f8e8d4',
+      textColor: textColor || '#2c2c2c',
+      lightText: lightText || '#666666',
+      bgColor: bgColor || '#fdfbf7',
+      borderColor: borderColor || '#e5d5c8',
+      accentColor: accentColor || '#b8860b',
+      isActive: true,
+      createdBy: req.user.email || 'admin'
+    });
+
+    await theme.save();
+
+    res.json({
+      success: true,
+      message: 'تم حفظ الألوان بنجاح',
+      theme: {
+        primaryColor: theme.primaryColor,
+        secondaryColor: theme.secondaryColor,
+        textColor: theme.textColor,
+        lightText: theme.lightText,
+        bgColor: theme.bgColor,
+        borderColor: theme.borderColor,
+        accentColor: theme.accentColor
+      }
+    });
+
+  } catch (error) {
+    console.error('❌ Save theme error:', error);
+    res.status(500).json({ 
+      success: false,
+      message: 'خطأ في حفظ الألوان' 
+    });
+  }
+});
+
+// ==========================================
+// MONGODB CONNECTION & SERVER STARTUP
+// ==========================================
+
 async function connectToAtlas() {
   try {
-    // ✅ Using your exact MongoDB Atlas URL
-    const MONGODB_URI = process.env.MONGODB_URI || 'mongodb+srv://mamanalgerienne:anesaya75@cluster0.iqodm96.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0';
+    const MONGODB_URI = process.env.MONGODB_URI || 'mongodb+srv://mamanalgerienne:anesaya75@cluster0.iqodm96.mongodb.net/mama-algerienne?retryWrites=true&w=majority&appName=Cluster0';
     
     console.log('🔌 Connecting to MongoDB Atlas...');
-    console.log('🔌 Using connection string with cluster0.iqodm96.mongodb.net');
     
     await mongoose.connect(MONGODB_URI, {
-      serverSelectionTimeoutMS: 30000, // 30 seconds
-      socketTimeoutMS: 45000 // 45 seconds
+      useNewUrlParser: true,
+      useUnifiedTopology: true,
     });
     
     console.log('✅ Connected to MongoDB Atlas successfully');
     console.log('📊 Database name:', mongoose.connection.name);
     console.log('📊 Connection state:', mongoose.connection.readyState);
     
-    // Create admin user after connection
     await createAdminUser();
-    
-    // Load full routes
-    setupFullRoutes();
-    
     return true;
   } catch (error) {
     console.error('❌ MongoDB Atlas connection failed:', error.message);
-    
-    if (error.message.includes('authentication failed')) {
-      console.log('🔐 Authentication failed - check username and password');
-      console.log('🔐 Expected: mamanalgerienne / anesaya75');
-    } else if (error.message.includes('ENOTFOUND')) {
-      console.log('🌐 DNS resolution failed - check cluster URL');
-    } else if (error.message.includes('serverSelectionTimeoutMS')) {
-      console.log('⏱️ Connection timeout - check network access and IP whitelist');
-    }
-    
-    console.log('🔄 Server will continue in fallback mode');
     return false;
   }
 }
 
-// Create admin user
 async function createAdminUser() {
   try {
     console.log('👤 Creating/checking admin user...');
-    
-    const User = require('./models/User');
     
     const existingAdmin = await User.findOne({ 
       email: 'mamanalgeriennepartenariat@gmail.com' 
@@ -403,99 +1291,60 @@ async function createAdminUser() {
       }
     }
   } catch (error) {
-    console.error('❌ Error creating admin user:', error.message);
+    console.error('Error creating admin user:', error.message);
   }
 }
 
-// Initialize server
+// Error handling middleware
+app.use((err, req, res, next) => {
+  console.error('Server error:', err.message);
+  res.status(500).json({ message: 'Server error', error: err.message });
+});
+
+// 404 handler - MUST be LAST
+app.use('*', (req, res) => {
+  console.log(`404 - Route not found: ${req.method} ${req.originalUrl}`);
+  res.status(404).json({ 
+    message: 'Route not found', 
+    path: req.originalUrl,
+    method: req.method
+  });
+});
+
+// Start server
 async function startServer() {
-  console.log('🚀 Starting Maman Algerienne Backend Server...');
-  console.log('📍 Environment:', process.env.NODE_ENV || 'development');
-  console.log('📍 Node.js version:', process.version);
-  console.log('📍 Mongoose version:', mongoose.version);
+  console.log('🔌 Mongoose version:', require('mongoose/package.json').version);
   
-  // Try to connect to MongoDB Atlas
   const dbConnected = await connectToAtlas();
   
-  if (!dbConnected) {
-    console.log('⚠️ Database connection failed - setting up fallback routes');
-    setupFallbackRoutes();
-  }
-  
-  // Error handling middleware
-  app.use((err, req, res, next) => {
-    console.error('Server error:', err.message);
-    res.status(500).json({ 
-      message: 'Server error', 
-      error: process.env.NODE_ENV === 'development' ? err.message : 'Internal server error'
-    });
-  });
-
-  // 404 handler - MUST be LAST
-  app.use('*', (req, res) => {
-    console.log(`404 - Route not found: ${req.method} ${req.originalUrl}`);
-    res.status(404).json({ 
-      message: 'Route not found', 
-      path: req.originalUrl,
-      method: req.method,
-      availableRoutes: [
-        'GET /health',
-        'GET /api/test', 
-        'GET /api/debug/connection',
-        'POST /api/auth/login',
-        'GET /api/articles',
-        'GET /api/products',
-        'GET /api/orders'
-      ]
-    });
-  });
-
-  // Start server
   const PORT = process.env.PORT || 5000;
-  const server = app.listen(PORT, () => {
+  app.listen(PORT, () => {
     console.log(`\n🎉 Maman Algerienne Backend Server running on port ${PORT}`);
-    console.log(`📊 Health check: ${PORT === 5000 ? 'http://localhost:5000' : 'https://your-app.onrender.com'}/health`);
-    console.log(`🧪 API Test: ${PORT === 5000 ? 'http://localhost:5000' : 'https://your-app.onrender.com'}/api/test`);
-    console.log(`🔍 Connection Debug: ${PORT === 5000 ? 'http://localhost:5000' : 'https://your-app.onrender.com'}/api/debug/connection`);
+    console.log(`📊 Health check: https://mamanalgerienne-backend.onrender.com/health`);
+    console.log(`🧪 API Test: https://mamanalgerienne-backend.onrender.com/api/test`);
     console.log(`🔧 Admin login: mamanalgeriennepartenariat@gmail.com / anesaya75`);
     
-    console.log('\n📋 Available Endpoints:');
-    console.log('  - GET  /health');
-    console.log('  - GET  /api/test');
-    console.log('  - GET  /api/debug/connection');
-    console.log('  - POST /api/auth/login');
-    console.log('  - GET  /api/articles');
-    console.log('  - GET  /api/products');
-    console.log('  - GET  /api/orders');
-    console.log('  - GET  /api/admin/dashboard');
-    console.log('  - GET  /api/admin/theme');
+    console.log(`📋 Available Endpoints:`);
+    console.log(` - POST /api/auth/login`);
+    console.log(` - POST /api/auth/register`);
+    console.log(` - GET /api/auth/me`);
+    console.log(` - GET /api/articles`);
+    console.log(` - GET /api/products`);
+    console.log(` - GET /api/posts`);
+    console.log(` - GET /api/admin/dashboard`);
+    console.log(` - GET /api/admin/theme`);
     
     if (dbConnected) {
-      console.log('\n✅ Server ready with MongoDB Atlas connection');
+      console.log('✅ Server ready with MongoDB Atlas connection');
     } else {
-      console.log('\n⚠️ Server running in fallback mode');
-      console.log('💡 To fix database connection:');
-      console.log('   1. Check MongoDB Atlas credentials');
-      console.log('   2. Verify network access (IP whitelist)');
-      console.log('   3. Test connection: /api/debug/connection');
+      console.log('⚠️ Server running with limited functionality (no database)');
     }
-    
-    console.log('\n' + '='.repeat(60));
-  });
-  
-  // Graceful shutdown
-  process.on('SIGTERM', () => {
-    console.log('SIGTERM received, shutting down gracefully');
-    server.close(() => {
-      console.log('Process terminated');
-      mongoose.connection.close();
-    });
+    console.log('============================================================');
   });
 }
 
-// Start the server
 startServer().catch(error => {
-  console.error('❌ Failed to start server:', error);
+  console.error('Failed to start server:', error);
   process.exit(1);
 });
 
