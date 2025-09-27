@@ -1094,6 +1094,224 @@ app.post('/api/posts/ad', adminAuth, upload.array('images', 10), async (req, res
 });
 
 // ==========================================
+// ORDER ROUTES
+// ==========================================
+
+// Create new order
+app.post('/api/orders', async (req, res) => {
+  try {
+    console.log('📦 Creating new order:', req.body);
+    
+    const { items, customerInfo, totalPrice } = req.body;
+
+    // Validation
+    if (!items || !Array.isArray(items) || items.length === 0) {
+      return res.status(400).json({
+        success: false,
+        message: 'لا توجد منتجات في الطلب'
+      });
+    }
+
+    if (!customerInfo || !customerInfo.name || !customerInfo.phone || !customerInfo.address) {
+      return res.status(400).json({
+        success: false,
+        message: 'معلومات العميل غير مكتملة'
+      });
+    }
+
+    if (!totalPrice || totalPrice <= 0) {
+      return res.status(400).json({
+        success: false,
+        message: 'إجمالي السعر غير صحيح'
+      });
+    }
+
+    // Generate order number
+    const orderNumber = 'ORD-' + Date.now().toString() + '-' + Math.random().toString(36).substr(2, 4).toUpperCase();
+
+    // Create order
+    const order = new Order({
+      orderNumber,
+      customerInfo: {
+        name: customerInfo.name,
+        phone: customerInfo.phone,
+        email: customerInfo.email || '',
+        address: customerInfo.address
+      },
+      items: items.map(item => ({
+        product: item.id,
+        productName: item.name,
+        quantity: item.quantity,
+        price: item.price
+      })),
+      totalPrice,
+      notes: customerInfo.notes || '',
+      status: 'pending'
+    });
+
+    await order.save();
+
+    console.log('✅ Order created successfully:', orderNumber);
+
+    res.status(201).json({
+      success: true,
+      message: 'تم إنشاء الطلب بنجاح',
+      order: {
+        id: order._id,
+        orderNumber: order.orderNumber,
+        status: order.status,
+        totalPrice: order.totalPrice,
+        createdAt: order.createdAt
+      }
+    });
+
+  } catch (error) {
+    console.error('❌ Create order error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'خطأ في إنشاء الطلب'
+    });
+  }
+});
+
+// Get all orders (for admin)
+app.get('/api/orders', adminAuth, async (req, res) => {
+  try {
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 20;
+    const skip = (page - 1) * limit;
+    const status = req.query.status;
+
+    let query = {};
+    if (status) {
+      query.status = status;
+    }
+
+    const orders = await Order.find(query)
+      .sort({ createdAt: -1 })
+      .skip(skip)
+      .limit(limit)
+      .populate('items.product');
+
+    const total = await Order.countDocuments(query);
+
+    res.json({
+      orders,
+      pagination: {
+        current: page,
+        pages: Math.ceil(total / limit),
+        total
+      }
+    });
+
+  } catch (error) {
+    console.error('❌ Get orders error:', error);
+    res.json({
+      orders: [],
+      pagination: { current: 1, pages: 0, total: 0 }
+    });
+  }
+});
+
+// Get single order
+app.get('/api/orders/:id', optionalAuth, async (req, res) => {
+  try {
+    const order = await Order.findById(req.params.id)
+      .populate('items.product');
+
+    if (!order) {
+      return res.status(404).json({
+        success: false,
+        message: 'الطلب غير موجود'
+      });
+    }
+
+    res.json({
+      success: true,
+      order
+    });
+
+  } catch (error) {
+    console.error('❌ Get order error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'خطأ في جلب الطلب'
+    });
+  }
+});
+
+// Update order status (admin only)
+app.patch('/api/orders/:id/status', adminAuth, async (req, res) => {
+  try {
+    const { status } = req.body;
+    
+    const validStatuses = ['pending', 'confirmed', 'shipped', 'delivered', 'cancelled'];
+    if (!validStatuses.includes(status)) {
+      return res.status(400).json({
+        success: false,
+        message: 'حالة الطلب غير صحيحة'
+      });
+    }
+
+    const order = await Order.findById(req.params.id);
+    if (!order) {
+      return res.status(404).json({
+        success: false,
+        message: 'الطلب غير موجود'
+      });
+    }
+
+    order.status = status;
+    await order.save();
+
+    console.log(`✅ Order ${order.orderNumber} status updated to: ${status}`);
+
+    res.json({
+      success: true,
+      message: 'تم تحديث حالة الطلب بنجاح',
+      order
+    });
+
+  } catch (error) {
+    console.error('❌ Update order status error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'خطأ في تحديث حالة الطلب'
+    });
+  }
+});
+
+// Delete order (admin only)
+app.delete('/api/orders/:id', adminAuth, async (req, res) => {
+  try {
+    const order = await Order.findById(req.params.id);
+    
+    if (!order) {
+      return res.status(404).json({
+        success: false,
+        message: 'الطلب غير موجود'
+      });
+    }
+
+    await Order.findByIdAndDelete(req.params.id);
+
+    console.log('✅ Order deleted:', order.orderNumber);
+
+    res.json({
+      success: true,
+      message: 'تم حذف الطلب بنجاح'
+    });
+
+  } catch (error) {
+    console.error('❌ Delete order error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'خطأ في حذف الطلب'
+    });
+  }
+});
+
+// ==========================================
 // ADMIN ROUTES
 // ==========================================
 
@@ -1235,6 +1453,114 @@ app.post('/api/admin/theme', adminAuth, async (req, res) => {
   }
 });
 
+// Get admin orders
+app.get('/api/admin/orders', adminAuth, async (req, res) => {
+  try {
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 20;
+    const skip = (page - 1) * limit;
+    const status = req.query.status;
+    const search = req.query.search;
+
+    let query = {};
+    
+    if (status) {
+      query.status = status;
+    }
+    
+    if (search) {
+      query.$or = [
+        { 'customerInfo.name': { $regex: search, $options: 'i' } },
+        { 'customerInfo.phone': { $regex: search, $options: 'i' } },
+        { orderNumber: { $regex: search, $options: 'i' } }
+      ];
+    }
+
+    const orders = await Order.find(query)
+      .sort({ createdAt: -1 })
+      .skip(skip)
+      .limit(limit)
+      .populate('items.product');
+
+    const total = await Order.countDocuments(query);
+
+    res.json({
+      orders,
+      pagination: {
+        current: page,
+        pages: Math.ceil(total / limit),
+        total
+      }
+    });
+
+  } catch (error) {
+    console.error('❌ Get admin orders error:', error);
+    res.json({
+      orders: [],
+      pagination: { current: 1, pages: 0, total: 0 }
+    });
+  }
+});
+
+// Get admin statistics
+app.get('/api/admin/stats', adminAuth, async (req, res) => {
+  try {
+    let stats = {
+      totalRevenue: 0,
+      monthlyRevenue: 0,
+      topProducts: [],
+      recentOrders: [],
+      userGrowth: []
+    };
+
+    try {
+      // Calculate revenue
+      const allOrders = await Order.find({ status: { $ne: 'cancelled' } });
+      stats.totalRevenue = allOrders.reduce((sum, order) => sum + order.totalPrice, 0);
+
+      // Monthly revenue
+      const thisMonth = new Date();
+      thisMonth.setDate(1);
+      const monthlyOrders = await Order.find({ 
+        createdAt: { $gte: thisMonth },
+        status: { $ne: 'cancelled' }
+      });
+      stats.monthlyRevenue = monthlyOrders.reduce((sum, order) => sum + order.totalPrice, 0);
+
+      // Top products (by order frequency)
+      const productStats = await Order.aggregate([
+        { $unwind: '$items' },
+        { $group: { 
+          _id: '$items.productName', 
+          count: { $sum: '$items.quantity' },
+          revenue: { $sum: { $multiply: ['$items.price', '$items.quantity'] } }
+        }},
+        { $sort: { count: -1 } },
+        { $limit: 5 }
+      ]);
+      stats.topProducts = productStats;
+
+      // Recent orders
+      stats.recentOrders = await Order.find({})
+        .sort({ createdAt: -1 })
+        .limit(5)
+        .select('orderNumber customerInfo.name totalPrice status createdAt');
+
+    } catch (error) {
+      console.log('⚠️ Some statistics unavailable:', error.message);
+    }
+
+    res.json(stats);
+
+  } catch (error) {
+    console.error('❌ Get admin stats error:', error);
+    res.status(500).json({ 
+      success: false,
+      message: 'خطأ في تحميل الإحصائيات'
+    });
+  }
+});
+
 // ==========================================
 // MONGODB CONNECTION & SERVER STARTUP
 // ==========================================
@@ -1329,10 +1655,18 @@ async function startServer() {
     console.log(` - POST /api/auth/register`);
     console.log(` - GET /api/auth/me`);
     console.log(` - GET /api/articles`);
+    console.log(` - POST /api/articles`);
     console.log(` - GET /api/products`);
+    console.log(` - POST /api/products`);
     console.log(` - GET /api/posts`);
+    console.log(` - POST /api/posts/community`);
+    console.log(` - POST /api/posts/ad`);
+    console.log(` - POST /api/orders`);
+    console.log(` - GET /api/orders`);
+    console.log(` - PATCH /api/orders/:id/status`);
     console.log(` - GET /api/admin/dashboard`);
     console.log(` - GET /api/admin/theme`);
+    console.log(` - POST /api/admin/theme`);
     
     if (dbConnected) {
       console.log('✅ Server ready with MongoDB Atlas connection');
