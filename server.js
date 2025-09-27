@@ -1,4 +1,4 @@
-require('dotenv').config(); // Load environment variables
+require('dotenv').config();
 
 const express = require('express');
 const mongoose = require('mongoose');
@@ -22,10 +22,8 @@ dirs.forEach(dir => {
 // CORS Configuration
 const corsOptions = {
   origin: function (origin, callback) {
-    // Allow requests with no origin (like mobile apps or curl requests)
     if (!origin) return callback(null, true);
     
-    // Allow your frontend URL and localhost for development
     const allowedOrigins = [
       process.env.FRONTEND_URL || 'https://maman-algerienne.onrender.com',
       'http://localhost:3000',
@@ -49,22 +47,17 @@ const corsOptions = {
 app.use(cors(corsOptions));
 
 // Middleware
-app.use(express.json({ limit: process.env.MAX_FILE_SIZE || '10mb' }));
-app.use(express.urlencoded({ extended: true, limit: process.env.MAX_FILE_SIZE || '10mb' }));
+app.use(express.json({ limit: '10mb' }));
+app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
 // Serve static files from uploads directory
-app.use('/uploads', express.static(path.join(__dirname, process.env.UPLOAD_PATH || './uploads')));
-
-// Serve static files in production
-if (process.env.NODE_ENV === 'production') {
-  app.use(express.static(path.join(__dirname, 'public')));
-}
+app.use('/uploads', express.static(path.join(__dirname, './uploads')));
 
 // Health check
 app.get('/health', (req, res) => {
   res.json({ 
     status: 'OK', 
-    message: 'Server is running',
+    message: 'Maman Algerienne Backend Server is running',
     timestamp: new Date().toISOString(),
     dbStatus: mongoose.connection.readyState === 1 ? 'Connected' : 'Disconnected',
     environment: process.env.NODE_ENV || 'development'
@@ -74,10 +67,9 @@ app.get('/health', (req, res) => {
 // Test route
 app.get('/api/test', (req, res) => {
   res.json({ 
-    message: 'API is working', 
+    message: 'Maman Algerienne API is working', 
     routes: 'loaded',
-    environment: process.env.NODE_ENV || 'development',
-    frontendUrl: process.env.FRONTEND_URL || 'not set'
+    environment: process.env.NODE_ENV || 'development'
   });
 });
 
@@ -98,7 +90,7 @@ function setupFullRoutes() {
     const postRoutes = require('./routes/posts');
     const commentRoutes = require('./routes/comments');
     const adminRoutes = require('./routes/admin');
-    const orderRoutes = require('./routes/Orders'); // Capital O
+    const orderRoutes = require('./routes/Orders');
 
     app.use('/api/auth', authRoutes);
     app.use('/api/articles', articleRoutes);
@@ -177,10 +169,6 @@ function setupFallbackRoutes() {
       });
     });
     
-    app.get(`${route}/:id`, (req, res) => {
-      res.status(404).json({ message: 'Item not found' });
-    });
-    
     app.post(route, (req, res) => {
       res.status(503).json({ 
         message: 'Database not available. Please check MongoDB Atlas connection.' 
@@ -188,7 +176,7 @@ function setupFallbackRoutes() {
     });
   });
 
-  // Admin dashboard route
+  // Admin routes
   app.get('/api/admin/dashboard', (req, res) => {
     res.json({
       counts: { articles: 0, products: 0, posts: 0, users: 1, comments: 0, orders: 0 },
@@ -196,24 +184,19 @@ function setupFallbackRoutes() {
     });
   });
   
-  // Admin theme route
   app.get('/api/admin/theme', (req, res) => {
     res.json({
       theme: {
         primaryColor: '#d4a574',
         secondaryColor: '#f8e8d4',
-        textColor: '#2c2c2c',
-        lightText: '#666666',
-        bgColor: '#fdfbf7',
-        borderColor: '#e5d5c8',
-        accentColor: '#b8860b'
+        textColor: '#2c2c2c'
       }
     });
   });
   
   app.post('/api/admin/theme', (req, res) => {
     res.json({
-      message: 'تم حفظ الألوان بنجاح (وضع التطوير)',
+      message: 'تم حفظ الألوان بنجاح',
       theme: req.body
     });
   });
@@ -224,11 +207,9 @@ function setupFallbackRoutes() {
 // MongoDB Atlas connection
 async function connectToAtlas() {
   try {
-    // Use your actual MongoDB Atlas URL
     const MONGODB_URI = process.env.MONGODB_URI || 'mongodb+srv://mamanalgerienne:anesaya75@cluster0.iqodm96.mongodb.net/mama-algerienne?retryWrites=true&w=majority&appName=Cluster0';
     
     console.log('Connecting to MongoDB Atlas...');
-    console.log('Using database: mama-algerienne');
     
     await mongoose.connect(MONGODB_URI, {
       useNewUrlParser: true,
@@ -246,12 +227,6 @@ async function connectToAtlas() {
     return true;
   } catch (error) {
     console.error('❌ MongoDB Atlas connection failed:', error.message);
-    
-    if (error.message.includes('authentication failed')) {
-      console.log('🔐 Please check your database password in the connection string');
-      console.log('🔐 Current password in URL: anesaya75');
-    }
-    
     return false;
   }
 }
@@ -294,13 +269,12 @@ async function createAdminUser() {
 async function startServer() {
   console.log('🚀 Starting Maman Algerienne Backend Server...');
   console.log('Environment:', process.env.NODE_ENV || 'development');
-  console.log('Frontend URL:', process.env.FRONTEND_URL || 'not set');
   
   // Try to connect to MongoDB Atlas
   const dbConnected = await connectToAtlas();
   
   if (!dbConnected) {
-    // Use fallback routes if database connection fails
+    console.log('⚠️ Database connection failed, using fallback routes');
     setupFallbackRoutes();
   }
   
@@ -323,23 +297,15 @@ async function startServer() {
   // Start server
   const PORT = process.env.PORT || 5000;
   app.listen(PORT, () => {
-    console.log(`\n🚀 Server running on port ${PORT}`);
+    console.log(`\n🚀 Maman Algerienne Backend Server running on port ${PORT}`);
     console.log(`📊 Health check: http://localhost:${PORT}/health`);
     console.log(`🧪 API Test: http://localhost:${PORT}/api/test`);
-    console.log(`📰 Articles: http://localhost:${PORT}/api/articles`);
-    console.log(`🛍️ Products: http://localhost:${PORT}/api/products`);
-    console.log(`📢 Posts: http://localhost:${PORT}/api/posts`);
-    console.log(`📦 Orders: http://localhost:${PORT}/api/orders`);
-    console.log(`🎨 Admin: http://localhost:${PORT}/api/admin`);
-    console.log(`\n🔧 Admin login credentials:`);
-    console.log(`   Email: mamanalgeriennepartenariat@gmail.com`);
-    console.log(`   Password: anesaya75\n`);
+    console.log(`🔧 Admin login: mamanalgeriennepartenariat@gmail.com / anesaya75`);
     
     if (dbConnected) {
       console.log('✅ Server ready with MongoDB Atlas');
     } else {
-      console.log('⚠️ Server running in fallback mode');
-      console.log('🔍 To fix: Check MongoDB Atlas connection string and credentials');
+      console.log('⚠️ Server running in fallback mode (check MongoDB connection)');
     }
   });
 }
