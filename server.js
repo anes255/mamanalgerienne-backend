@@ -19,7 +19,7 @@ dirs.forEach(dir => {
   }
 });
 
-// CORS Configuration - Updated for better compatibility
+// CORS Configuration
 const corsOptions = {
   origin: function (origin, callback) {
     // Allow requests with no origin (like mobile apps or curl requests)
@@ -30,19 +30,10 @@ const corsOptions = {
       process.env.FRONTEND_URL || 'https://maman-algerienne.onrender.com',
       'http://localhost:3000',
       'http://127.0.0.1:3000',
-      'http://localhost:8080',
-      'http://127.0.0.1:8080',
-      'https://maman-algerienne.onrender.com',
-      // Allow file:// protocol for local development
-      'null'
+      'https://maman-algerienne.onrender.com'
     ];
     
-    // Allow localhost with any port for development
-    if (origin && (origin.includes('localhost') || origin.includes('127.0.0.1'))) {
-      return callback(null, true);
-    }
-    
-    if (allowedOrigins.indexOf(origin) !== -1 || origin === 'null') {
+    if (allowedOrigins.indexOf(origin) !== -1) {
       callback(null, true);
     } else {
       console.log('Blocked by CORS:', origin);
@@ -51,24 +42,14 @@ const corsOptions = {
   },
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'Accept', 'Origin', 'X-Requested-With'],
-  optionsSuccessStatus: 200 // Some legacy browsers choke on 204
+  allowedHeaders: ['Content-Type', 'Authorization']
 };
 
 app.use(cors(corsOptions));
 
-// Handle preflight requests
-app.options('*', cors(corsOptions));
-
 // Middleware
 app.use(express.json({ limit: process.env.MAX_FILE_SIZE || '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: process.env.MAX_FILE_SIZE || '10mb' }));
-
-// Add request logging
-app.use((req, res, next) => {
-  console.log(`${new Date().toISOString()} - ${req.method} ${req.path} - Origin: ${req.get('Origin') || 'none'}`);
-  next();
-});
 
 // Serve static files from uploads directory
 app.use('/uploads', express.static(path.join(__dirname, process.env.UPLOAD_PATH || './uploads')));
@@ -76,11 +57,6 @@ app.use('/uploads', express.static(path.join(__dirname, process.env.UPLOAD_PATH 
 // Serve static files in production
 if (process.env.NODE_ENV === 'production') {
   app.use(express.static(path.join(__dirname, 'public')));
-  
-  // Handle React routing, return all requests to the app (if you had a React frontend)
-  // app.get('*', (req, res) => {
-  //   res.sendFile(path.join(__dirname, 'public', 'index.html'));
-  // });
 }
 
 // Health check
@@ -90,7 +66,8 @@ app.get('/health', (req, res) => {
     message: 'Server is running',
     timestamp: new Date().toISOString(),
     dbStatus: mongoose.connection.readyState === 1 ? 'Connected' : 'Disconnected',
-    environment: process.env.NODE_ENV || 'development'
+    environment: process.env.NODE_ENV || 'development',
+    mongoUri: process.env.MONGODB_URI ? 'Set' : 'Not Set'
   });
 });
 
@@ -145,103 +122,85 @@ function setupFullRoutes() {
 function setupFallbackRoutes() {
   console.log('Setting up fallback routes...');
   
-  // Basic auth for admin panel - Enhanced
+  // Basic auth for admin panel
   app.post('/api/auth/login', (req, res) => {
     const { email, password } = req.body;
     
-    console.log('Login attempt:', email);
+    console.log('Fallback login attempt:', { email });
     
     if (email === 'mamanalgeriennepartenariat@gmail.com' && password === 'anesaya75') {
-      const userData = {
+      res.json({
+        success: true,
+        message: 'تم تسجيل الدخول بنجاح',
         token: 'test-admin-token',
         user: {
           id: '1',
           name: 'مدير الموقع',
           email: 'mamanalgeriennepartenariat@gmail.com',
-          isAdmin: true,
-          avatar: null,
-          phone: '0555123456'
+          phone: '0555123456',
+          isAdmin: true
         }
-      };
-      
-      console.log('Login successful for admin');
-      res.json(userData);
+      });
     } else {
-      console.log('Login failed for:', email);
       res.status(400).json({ 
-        message: 'بيانات الدخول غير صحيحة',
-        code: 'INVALID_CREDENTIALS'
+        success: false,
+        message: 'بيانات الدخول غير صحيحة' 
       });
     }
   });
   
   app.get('/api/auth/me', (req, res) => {
     const token = req.headers.authorization?.replace('Bearer ', '');
-    console.log('Auth check with token:', token);
-    
     if (token === 'test-admin-token') {
       res.json({
+        success: true,
         user: {
           id: '1',
           name: 'مدير الموقع',
           email: 'mamanalgeriennepartenariat@gmail.com',
-          isAdmin: true,
-          avatar: null,
-          phone: '0555123456'
+          phone: '0555123456',
+          isAdmin: true
         }
       });
     } else {
       res.status(401).json({ 
-        message: 'غير مصرح',
-        code: 'TOKEN_INVALID'
+        success: false,
+        message: 'غير مصرح' 
       });
     }
   });
   
-  // Registration fallback
-  app.post('/api/auth/register', (req, res) => {
-    res.status(503).json({ 
-      message: 'التسجيل غير متاح حالياً. قاعدة البيانات غير متصلة.',
-      code: 'SERVICE_UNAVAILABLE'
-    });
-  });
-  
-  // Empty data routes with better structure
+  // Empty data routes
   const emptyRoutes = [
-    { path: '/api/articles', dataKey: 'articles' },
-    { path: '/api/products', dataKey: 'products' }, 
-    { path: '/api/posts', dataKey: 'posts' },
-    { path: '/api/comments', dataKey: 'comments' }
+    '/api/articles',
+    '/api/products', 
+    '/api/posts',
+    '/api/comments'
   ];
   
   emptyRoutes.forEach(route => {
-    app.get(route.path, (req, res) => {
-      console.log(`Fallback route hit: ${route.path}`);
-      const responseData = {
-        [route.dataKey]: [],
-        pagination: { 
-          current: 1, 
-          pages: 0, 
-          total: 0,
-          limit: 10
-        },
+    app.get(route, (req, res) => {
+      res.json({
         success: true,
-        message: 'No data available - database not connected'
-      };
-      res.json(responseData);
-    });
-    
-    app.get(`${route.path}/:id`, (req, res) => {
-      res.status(404).json({ 
-        message: 'Item not found',
-        code: 'NOT_FOUND'
+        articles: [],
+        products: [],
+        posts: [],
+        comments: [],
+        pagination: { current: 1, pages: 0, total: 0 }
       });
     });
     
-    app.post(route.path, (req, res) => {
+    app.get(`${route}/:id`, (req, res) => {
+      res.status(404).json({ 
+        success: false,
+        message: 'Item not found' 
+      });
+    });
+    
+    app.post(route, (req, res) => {
       res.status(503).json({ 
-        message: 'Database not available. Please check MongoDB Atlas connection.',
-        code: 'SERVICE_UNAVAILABLE'
+        success: false,
+        message: 'Database not available. Please check MongoDB Atlas connection.' 
       });
     });
   });
@@ -249,20 +208,9 @@ function setupFallbackRoutes() {
   // Admin dashboard route
   app.get('/api/admin/dashboard', (req, res) => {
     res.json({
-      counts: { 
-        articles: 0, 
-        products: 0, 
-        posts: 0, 
-        users: 1, 
-        comments: 0 
-      },
-      stats: { 
-        todayViews: 0, 
-        pendingComments: 0, 
-        newUsersThisWeek: 0, 
-        popularCategory: 'عام' 
-      },
-      success: true
+      success: true,
+      counts: { articles: 0, products: 0, posts: 0, users: 1, comments: 0 },
+      stats: { todayViews: 0, pendingComments: 0, newUsersThisWeek: 0, popularCategory: 'عام' }
     });
   });
   
@@ -275,12 +223,11 @@ async function connectToAtlas() {
     const MONGODB_URI = process.env.MONGODB_URI || 'mongodb+srv://mamanalgerienne:anesaya75@cluster0.iqodm96.mongodb.net/mama-algerienne?retryWrites=true&w=majority&appName=Cluster0';
     
     console.log('Connecting to MongoDB Atlas...');
+    console.log('MongoDB URI:', MONGODB_URI.replace(/:[^:@]*@/, ':***@')); // Hide password in logs
     
     await mongoose.connect(MONGODB_URI, {
       useNewUrlParser: true,
       useUnifiedTopology: true,
-      serverSelectionTimeoutMS: 10000, // 10 seconds
-      socketTimeoutMS: 45000, // 45 seconds
     });
     
     console.log('✅ Connected to MongoDB Atlas successfully');
@@ -304,37 +251,50 @@ async function connectToAtlas() {
   }
 }
 
-// Create admin user
+// Create admin user - FIXED VERSION
 async function createAdminUser() {
   try {
+    // Import User model
     const User = require('./models/User');
+    
+    console.log('🔍 Checking for admin user...');
     
     const existingAdmin = await User.findOne({ 
       email: 'mamanalgeriennepartenariat@gmail.com' 
     });
     
     if (!existingAdmin) {
+      console.log('👤 Creating admin user...');
+      
       const admin = new User({
         name: 'مدير الموقع',
         email: 'mamanalgeriennepartenariat@gmail.com',
         phone: '0555123456',
-        password: 'anesaya75',
-        isAdmin: true
+        password: 'anesaya75', // Will be hashed by pre-save middleware
+        isAdmin: true,
+        isVerified: true
       });
       
       await admin.save();
       console.log('✅ Admin user created successfully');
+      console.log('📧 Email:', admin.email);
+      console.log('🔑 Password: anesaya75');
+      console.log('👑 Admin: true');
     } else {
+      console.log('✅ Admin user already exists');
+      console.log('📧 Email:', existingAdmin.email);
+      console.log('👑 Admin:', existingAdmin.isAdmin);
+      
+      // Make sure existing user is admin
       if (!existingAdmin.isAdmin) {
         existingAdmin.isAdmin = true;
         await existingAdmin.save();
         console.log('✅ Existing user promoted to admin');
-      } else {
-        console.log('✅ Admin user already exists');
       }
     }
   } catch (error) {
-    console.error('Error creating admin user:', error.message);
+    console.error('❌ Error creating admin user:', error.message);
+    console.error('Stack:', error.stack);
   }
 }
 
@@ -343,12 +303,13 @@ async function startServer() {
   console.log('🚀 Starting server...');
   console.log('Environment:', process.env.NODE_ENV || 'development');
   console.log('Frontend URL:', process.env.FRONTEND_URL || 'not set');
+  console.log('Port:', process.env.PORT || 5000);
   
   // Try to connect to MongoDB Atlas
   const dbConnected = await connectToAtlas();
   
   if (!dbConnected) {
-    console.log('⚠️ Database connection failed, using fallback routes');
+    console.log('⚠️ Using fallback routes due to database connection failure');
     // Use fallback routes if database connection fails
     setupFallbackRoutes();
   }
@@ -356,36 +317,27 @@ async function startServer() {
   // Error handling middleware
   app.use((err, req, res, next) => {
     console.error('Server error:', err.message);
-    
-    // Don't expose internal errors in production
-    if (process.env.NODE_ENV === 'production') {
-      res.status(500).json({ 
-        message: 'حدث خطأ في الخادم',
-        code: 'INTERNAL_ERROR'
-      });
-    } else {
-      res.status(500).json({ 
-        message: 'Server error', 
-        error: err.message,
-        code: 'INTERNAL_ERROR'
-      });
-    }
+    res.status(500).json({ 
+      success: false,
+      message: 'Server error', 
+      error: process.env.NODE_ENV === 'development' ? err.message : 'Internal server error'
+    });
   });
 
   // 404 handler - MUST be LAST
   app.use('*', (req, res) => {
     console.log(`404 - Route not found: ${req.method} ${req.originalUrl}`);
     res.status(404).json({ 
+      success: false,
       message: 'Route not found', 
       path: req.originalUrl,
-      method: req.method,
-      code: 'NOT_FOUND'
+      method: req.method
     });
   });
 
   // Start server
   const PORT = process.env.PORT || 5000;
-  const server = app.listen(PORT, () => {
+  app.listen(PORT, () => {
     console.log(`\n🚀 Server running on port ${PORT}`);
     console.log(`📊 Health check: http://localhost:${PORT}/health`);
     console.log(`🧪 API Test: http://localhost:${PORT}/api/test`);
@@ -402,15 +354,6 @@ async function startServer() {
       console.log('⚠️ Server running in fallback mode');
       console.log('🔍 To fix: Check MongoDB Atlas connection string and credentials');
     }
-  });
-
-  // Handle server shutdown gracefully
-  process.on('SIGTERM', () => {
-    console.log('SIGTERM received, shutting down gracefully');
-    server.close(() => {
-      console.log('Process terminated');
-      mongoose.connection.close();
-    });
   });
 }
 
