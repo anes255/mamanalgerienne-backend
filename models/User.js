@@ -1,103 +1,256 @@
+// models/User.js - Missing User Model
 const mongoose = require('mongoose');
 const bcrypt = require('bcryptjs');
 
-const UserSchema = new mongoose.Schema({
-    name: {
-        type: String,
-        required: [true, 'Name is required'],
-        trim: true,
-        maxlength: [100, 'Name cannot be more than 100 characters']
+const userSchema = new mongoose.Schema({
+  name: {
+    type: String,
+    required: [true, 'الاسم مطلوب'],
+    trim: true,
+    minlength: [2, 'الاسم يجب أن يكون حرفان على الأقل'],
+    maxlength: [50, 'الاسم لا يمكن أن يتجاوز 50 حرف']
+  },
+  email: {
+    type: String,
+    required: [true, 'البريد الإلكتروني مطلوب'],
+    unique: true,
+    lowercase: true,
+    trim: true,
+    match: [/^\S+@\S+\.\S+$/, 'البريد الإلكتروني غير صحيح']
+  },
+  phone: {
+    type: String,
+    required: [true, 'رقم الهاتف مطلوب'],
+    unique: true,
+    trim: true,
+    match: [/^[0-9]{10}$/, 'رقم الهاتف يجب أن يكون 10 أرقام']
+  },
+  password: {
+    type: String,
+    required: [true, 'كلمة المرور مطلوبة'],
+    minlength: [6, 'كلمة المرور يجب أن تكون 6 أحرف على الأقل']
+  },
+  avatar: {
+    type: String,
+    default: null
+  },
+  isAdmin: {
+    type: Boolean,
+    default: false
+  },
+  isActive: {
+    type: Boolean,
+    default: true
+  },
+  emailVerified: {
+    type: Boolean,
+    default: false
+  },
+  phoneVerified: {
+    type: Boolean,
+    default: false
+  },
+  lastLogin: {
+    type: Date,
+    default: null
+  },
+  loginAttempts: {
+    type: Number,
+    default: 0
+  },
+  lockedUntil: {
+    type: Date,
+    default: null
+  },
+  resetPasswordToken: {
+    type: String,
+    default: null
+  },
+  resetPasswordExpires: {
+    type: Date,
+    default: null
+  },
+  emailVerificationToken: {
+    type: String,
+    default: null
+  },
+  emailVerificationExpires: {
+    type: Date,
+    default: null
+  },
+  preferences: {
+    notifications: {
+      email: { type: Boolean, default: true },
+      push: { type: Boolean, default: true },
+      sms: { type: Boolean, default: false }
     },
-    email: {
-        type: String,
-        required: [true, 'Email is required'],
-        unique: true,
-        lowercase: true,
-        trim: true,
-        match: [/^\w+([.-]?\w+)*@\w+([.-]?\w+)*(\.\w{2,3})+$/, 'Please enter a valid email']
-    },
-    password: {
-        type: String,
-        required: [true, 'Password is required'],
-        minlength: [6, 'Password must be at least 6 characters']
-    },
-    phone: {
-        type: String,
-        required: [true, 'Phone number is required'],
-        trim: true
-    },
-    address: {
-        type: String,
-        trim: true
-    },
-    wilaya: {
-        type: String,
-        trim: true
-    },
-    isAdmin: {
-        type: Boolean,
-        default: false
-    },
-    isActive: {
-        type: Boolean,
-        default: true
-    },
-    avatar: {
-        type: String,
-        default: ''
-    },
-    resetPasswordToken: String,
-    resetPasswordExpires: Date,
-    emailVerified: {
-        type: Boolean,
-        default: false
-    },
-    emailVerificationToken: String,
-    lastLogin: {
-        type: Date,
-        default: Date.now
-    }
+    language: { type: String, default: 'ar' },
+    theme: { type: String, default: 'light' }
+  },
+  socialLinks: {
+    facebook: { type: String, default: null },
+    twitter: { type: String, default: null },
+    instagram: { type: String, default: null },
+    website: { type: String, default: null }
+  },
+  bio: {
+    type: String,
+    maxlength: [500, 'النبذة الشخصية لا يمكن أن تتجاوز 500 حرف'],
+    default: null
+  },
+  location: {
+    city: { type: String, default: null },
+    country: { type: String, default: 'الجزائر' }
+  }
 }, {
-    timestamps: true
+  timestamps: true,
+  toJSON: { 
+    transform: function(doc, ret) {
+      delete ret.password;
+      delete ret.resetPasswordToken;
+      delete ret.emailVerificationToken;
+      delete ret.loginAttempts;
+      delete ret.lockedUntil;
+      return ret;
+    }
+  }
 });
 
 // Hash password before saving
-UserSchema.pre('save', async function(next) {
-    // Only hash password if it has been modified (or is new)
-    if (!this.isModified('password')) return next();
-    
-    try {
-        // Hash password with cost of 10
-        const salt = await bcrypt.genSalt(10);
-        this.password = await bcrypt.hash(this.password, salt);
-        next();
-    } catch (error) {
-        next(error);
-    }
+userSchema.pre('save', async function(next) {
+  // Only hash password if it's modified or new
+  if (!this.isModified('password')) return next();
+  
+  try {
+    // Hash password with cost of 12
+    const salt = await bcrypt.genSalt(12);
+    this.password = await bcrypt.hash(this.password, salt);
+    next();
+  } catch (error) {
+    next(error);
+  }
 });
 
+// Update last login timestamp
+userSchema.methods.updateLastLogin = function() {
+  this.lastLogin = new Date();
+  this.loginAttempts = 0;
+  this.lockedUntil = null;
+  return this.save();
+};
+
+// Check if account is locked
+userSchema.virtual('isLocked').get(function() {
+  return !!(this.lockedUntil && this.lockedUntil > Date.now());
+});
+
+// Increment login attempts
+userSchema.methods.incLoginAttempts = function() {
+  // If we have a previous lock that has expired, restart at 1
+  if (this.lockedUntil && this.lockedUntil < Date.now()) {
+    return this.updateOne({
+      $unset: { lockedUntil: 1 },
+      $set: { loginAttempts: 1 }
+    });
+  }
+  
+  const updates = { $inc: { loginAttempts: 1 } };
+  
+  // Lock account after 5 failed attempts for 2 hours
+  if (this.loginAttempts + 1 >= 5 && !this.isLocked) {
+    updates.$set = { lockedUntil: Date.now() + 2 * 60 * 60 * 1000 }; // 2 hours
+  }
+  
+  return this.updateOne(updates);
+};
+
 // Compare password method
-UserSchema.methods.comparePassword = async function(candidatePassword) {
-    try {
-        return await bcrypt.compare(candidatePassword, this.password);
-    } catch (error) {
-        throw error;
-    }
+userSchema.methods.comparePassword = async function(candidatePassword) {
+  return bcrypt.compare(candidatePassword, this.password);
 };
 
-// Get user without password
-UserSchema.methods.toJSON = function() {
-    const user = this.toObject();
-    delete user.password;
-    delete user.resetPasswordToken;
-    delete user.resetPasswordExpires;
-    delete user.emailVerificationToken;
-    return user;
+// Generate password reset token
+userSchema.methods.generateResetToken = function() {
+  const crypto = require('crypto');
+  const resetToken = crypto.randomBytes(32).toString('hex');
+  
+  this.resetPasswordToken = crypto
+    .createHash('sha256')
+    .update(resetToken)
+    .digest('hex');
+    
+  this.resetPasswordExpires = Date.now() + 10 * 60 * 1000; // 10 minutes
+  
+  return resetToken;
 };
 
-// Create indexes
-UserSchema.index({ email: 1 });
-UserSchema.index({ isAdmin: 1 });
-UserSchema.index({ createdAt: -1 });
+// Generate email verification token
+userSchema.methods.generateEmailVerificationToken = function() {
+  const crypto = require('crypto');
+  const verificationToken = crypto.randomBytes(32).toString('hex');
+  
+  this.emailVerificationToken = crypto
+    .createHash('sha256')
+    .update(verificationToken)
+    .digest('hex');
+    
+  this.emailVerificationExpires = Date.now() + 24 * 60 * 60 * 1000; // 24 hours
+  
+  return verificationToken;
+};
 
-module.exports = mongoose.model('User', UserSchema);
+// Instance method to get public profile
+userSchema.methods.getPublicProfile = function() {
+  return {
+    id: this._id,
+    name: this.name,
+    avatar: this.avatar,
+    bio: this.bio,
+    location: this.location,
+    socialLinks: this.socialLinks,
+    createdAt: this.createdAt
+  };
+};
+
+// Static method to find by email or phone
+userSchema.statics.findByEmailOrPhone = function(emailOrPhone) {
+  return this.findOne({
+    $or: [
+      { email: emailOrPhone },
+      { phone: emailOrPhone }
+    ]
+  });
+};
+
+// Pre-remove middleware to clean up related data
+userSchema.pre('remove', async function(next) {
+  try {
+    // Remove user's posts
+    await this.model('Post').deleteMany({ author: this._id });
+    
+    // Remove user's comments
+    await this.model('Comment').deleteMany({ author: this._id });
+    
+    // Remove user's orders
+    await this.model('Order').deleteMany({ user: this._id });
+    
+    next();
+  } catch (error) {
+    next(error);
+  }
+});
+
+// Index for faster queries
+userSchema.index({ email: 1 });
+userSchema.index({ phone: 1 });
+userSchema.index({ isAdmin: 1 });
+userSchema.index({ isActive: 1 });
+userSchema.index({ createdAt: -1 });
+
+// Compound indexes
+userSchema.index({ email: 1, isActive: 1 });
+userSchema.index({ phone: 1, isActive: 1 });
+
+const User = mongoose.model('User', userSchema);
+
+module.exports = User;
