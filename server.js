@@ -207,7 +207,8 @@ function setupFallbackRoutes() {
 // MongoDB Atlas connection
 async function connectToAtlas() {
   try {
-    const MONGODB_URI = process.env.MONGODB_URI || 'mongodb+srv://mamanalgerienne:anesaya75@cluster0.iqodm96.mongodb.net/mama-algerienne?retryWrites=true&w=majority&appName=Cluster0';
+    // ✅ FIXED: Using your exact MongoDB Atlas URL
+    const MONGODB_URI = process.env.MONGODB_URI || 'mongodb+srv://mamanalgerienne:anesaya75@cluster0.iqodm96.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0';
     
     console.log('Connecting to MongoDB Atlas...');
     
