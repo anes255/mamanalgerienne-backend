@@ -475,51 +475,120 @@ app.get('/api/test', (req, res) => {
 // Register
 app.post('/api/auth/register', async (req, res) => {
   try {
+    console.log('📝 Registration attempt with data:', { 
+      ...req.body, 
+      password: '[HIDDEN]', 
+      confirmPassword: '[HIDDEN]' 
+    });
+    
     const { name, email, phone, password, confirmPassword } = req.body;
 
-    // Validation
-    if (!name || !email || !phone || !password) {
+    // Enhanced validation with detailed logging
+    if (!name) {
+      console.log('❌ Registration failed: Missing name');
       return res.status(400).json({
         success: false,
-        message: 'جميع الحقول مطلوبة'
+        message: 'الاسم مطلوب'
       });
     }
 
-    if (password !== confirmPassword) {
+    if (!email) {
+      console.log('❌ Registration failed: Missing email');
+      return res.status(400).json({
+        success: false,
+        message: 'البريد الإلكتروني مطلوب'
+      });
+    }
+
+    if (!phone) {
+      console.log('❌ Registration failed: Missing phone');
+      return res.status(400).json({
+        success: false,
+        message: 'رقم الهاتف مطلوب'
+      });
+    }
+
+    if (!password) {
+      console.log('❌ Registration failed: Missing password');
+      return res.status(400).json({
+        success: false,
+        message: 'كلمة المرور مطلوبة'
+      });
+    }
+
+    // Check password confirmation if provided
+    if (confirmPassword && password !== confirmPassword) {
+      console.log('❌ Registration failed: Password mismatch');
       return res.status(400).json({
         success: false,
         message: 'كلمات المرور غير متطابقة'
       });
     }
 
+    // Validate password length
     if (password.length < 6) {
+      console.log('❌ Registration failed: Password too short');
       return res.status(400).json({
         success: false,
         message: 'كلمة المرور يجب أن تكون 6 أحرف على الأقل'
       });
     }
 
-    // Check if user exists
-    const existingUser = await User.findOne({ 
-      $or: [{ email }, { phone }] 
-    });
-
-    if (existingUser) {
+    // Validate email format
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(email)) {
+      console.log('❌ Registration failed: Invalid email format');
       return res.status(400).json({
         success: false,
-        message: 'المستخدم موجود مسبقاً'
+        message: 'البريد الإلكتروني غير صحيح'
       });
     }
 
+    // Validate phone format (Algerian phone numbers)
+    const phoneRegex = /^[0-9]{10}$/;
+    const cleanPhone = phone.replace(/\s/g, '');
+    if (!phoneRegex.test(cleanPhone)) {
+      console.log('❌ Registration failed: Invalid phone format');
+      return res.status(400).json({
+        success: false,
+        message: 'رقم الهاتف يجب أن يكون 10 أرقام'
+      });
+    }
+
+    // Check if user exists
+    console.log('🔍 Checking if user exists...');
+    const existingUser = await User.findOne({ 
+      $or: [{ email }, { phone: cleanPhone }] 
+    });
+
+    if (existingUser) {
+      console.log('❌ Registration failed: User already exists');
+      if (existingUser.email === email) {
+        return res.status(400).json({
+          success: false,
+          message: 'البريد الإلكتروني مستخدم مسبقاً'
+        });
+      } else {
+        return res.status(400).json({
+          success: false,
+          message: 'رقم الهاتف مستخدم مسبقاً'
+        });
+      }
+    }
+
     // Create user
+    console.log('👤 Creating new user...');
     const user = new User({
-      name,
-      email,
-      phone,
-      password
+      name: name.trim(),
+      email: email.toLowerCase().trim(),
+      phone: cleanPhone,
+      password: password.trim(),
+      isAdmin: false,
+      isActive: true
     });
 
     await user.save();
+    console.log('✅ User created successfully:', user.email);
 
     // Create token
     const token = jwt.sign({ userId: user._id }, JWT_SECRET, { expiresIn: '30d' });
@@ -539,10 +608,37 @@ app.post('/api/auth/register', async (req, res) => {
     });
 
   } catch (error) {
-    console.error('Register error:', error);
+    console.error('❌ Registration error:', error);
+    
+    // Handle specific MongoDB errors
+    if (error.name === 'ValidationError') {
+      const errorMessages = Object.values(error.errors).map(err => err.message);
+      return res.status(400).json({
+        success: false,
+        message: 'خطأ في التحقق من البيانات: ' + errorMessages.join(', ')
+      });
+    }
+
+    // Handle duplicate key errors
+    if (error.code === 11000) {
+      const field = Object.keys(error.keyPattern)[0];
+      let message = 'البيانات مستخدمة مسبقاً';
+      
+      if (field === 'email') {
+        message = 'البريد الإلكتروني مستخدم مسبقاً';
+      } else if (field === 'phone') {
+        message = 'رقم الهاتف مستخدم مسبقاً';
+      }
+      
+      return res.status(400).json({
+        success: false,
+        message
+      });
+    }
+
     res.status(500).json({
       success: false,
-      message: 'خطأ في الخادم'
+      message: 'خطأ في الخادم: ' + error.message
     });
   }
 });
@@ -785,30 +881,79 @@ app.get('/api/articles/category/:category', optionalAuth, async (req, res) => {
 // Create article (admin only)
 app.post('/api/articles', adminAuth, upload.array('images', 5), async (req, res) => {
   try {
+    console.log('📝 Creating article with data:', req.body);
+    console.log('📁 Files received:', req.files?.length || 0);
+    
     const { title, content, excerpt, category, featured, tags } = req.body;
 
-    if (!title || !content || !excerpt || !category) {
+    // Validation with detailed logging
+    if (!title) {
+      console.log('❌ Missing title');
       return res.status(400).json({ 
         success: false,
-        message: 'جميع الحقول المطلوبة يجب ملؤها' 
+        message: 'العنوان مطلوب' 
+      });
+    }
+
+    if (!content) {
+      console.log('❌ Missing content');
+      return res.status(400).json({ 
+        success: false,
+        message: 'المحتوى مطلوب' 
+      });
+    }
+
+    if (!excerpt) {
+      console.log('❌ Missing excerpt');
+      return res.status(400).json({ 
+        success: false,
+        message: 'الملخص مطلوب' 
+      });
+    }
+
+    if (!category) {
+      console.log('❌ Missing category');
+      return res.status(400).json({ 
+        success: false,
+        message: 'التصنيف مطلوب' 
       });
     }
 
     const images = req.files ? req.files.map(file => file.filename) : [];
+    console.log('📷 Processed images:', images);
+
+    // Ensure we have a valid author ID
+    const authorId = req.userId || req.user._id || req.user.id;
+    if (!authorId) {
+      console.log('❌ No author ID found');
+      return res.status(400).json({ 
+        success: false,
+        message: 'معرف المؤلف غير صحيح' 
+      });
+    }
+
+    console.log('👤 Author ID:', authorId);
 
     const article = new Article({
-      title,
-      content,
-      excerpt,
-      category,
+      title: title.trim(),
+      content: content.trim(),
+      excerpt: excerpt.trim(),
+      category: category.trim(),
       images,
-      author: req.userId,
-      featured: featured === 'true',
-      tags: tags ? tags.split(',').map(tag => tag.trim()) : []
+      author: authorId,
+      featured: featured === 'true' || featured === true,
+      published: true,
+      tags: tags ? tags.split(',').map(tag => tag.trim()).filter(tag => tag.length > 0) : [],
+      views: 0,
+      likes: []
     });
 
+    console.log('💾 Saving article:', article.title);
     await article.save();
-    await article.populate('author', 'name avatar');
+    
+    // Populate author info
+    await article.populate('author', 'name avatar email');
+    console.log('✅ Article created successfully:', article._id);
 
     res.status(201).json({
       success: true,
@@ -816,10 +961,33 @@ app.post('/api/articles', adminAuth, upload.array('images', 5), async (req, res)
       article
     });
   } catch (error) {
-    console.error('Create article error:', error);
+    console.error('❌ Create article error:', error);
+    console.error('Error details:', {
+      name: error.name,
+      message: error.message,
+      stack: error.stack
+    });
+    
+    // Handle specific MongoDB validation errors
+    if (error.name === 'ValidationError') {
+      const errorMessages = Object.values(error.errors).map(err => err.message);
+      return res.status(400).json({ 
+        success: false,
+        message: 'خطأ في التحقق من البيانات: ' + errorMessages.join(', ')
+      });
+    }
+
+    // Handle duplicate key errors
+    if (error.code === 11000) {
+      return res.status(400).json({ 
+        success: false,
+        message: 'يوجد مقال بنفس العنوان مسبقاً'
+      });
+    }
+
     res.status(500).json({ 
       success: false,
-      message: 'خطأ في إنشاء المقال' 
+      message: 'خطأ في إنشاء المقال: ' + error.message
     });
   }
 });
