@@ -59,7 +59,15 @@ const corsOptions = {
 app.use(cors(corsOptions));
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
-app.use('/uploads', express.static(path.join(__dirname, './uploads')));
+
+// Serve static files from uploads directory with proper headers
+app.use('/uploads', (req, res, next) => {
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'GET');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+  res.setHeader('Cache-Control', 'public, max-age=31536000');
+  next();
+}, express.static(path.join(__dirname, process.env.UPLOAD_PATH || './uploads')));
 
 // ==========================================
 // DATABASE MODELS
@@ -243,7 +251,6 @@ const auth = async (req, res, next) => {
       });
     }
 
-    // Handle test token for development
     if (token === 'test-admin-token') {
       req.user = {
         _id: '1',
@@ -483,7 +490,6 @@ app.post('/api/auth/register', async (req, res) => {
     
     const { name, email, phone, password, confirmPassword } = req.body;
 
-    // Enhanced validation with detailed logging
     if (!name) {
       console.log('❌ Registration failed: Missing name');
       return res.status(400).json({
@@ -516,7 +522,6 @@ app.post('/api/auth/register', async (req, res) => {
       });
     }
 
-    // Check password confirmation if provided
     if (confirmPassword && password !== confirmPassword) {
       console.log('❌ Registration failed: Password mismatch');
       return res.status(400).json({
@@ -525,7 +530,6 @@ app.post('/api/auth/register', async (req, res) => {
       });
     }
 
-    // Validate password length
     if (password.length < 6) {
       console.log('❌ Registration failed: Password too short');
       return res.status(400).json({
@@ -534,7 +538,6 @@ app.post('/api/auth/register', async (req, res) => {
       });
     }
 
-    // Validate email format
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
     if (!emailRegex.test(email)) {
       console.log('❌ Registration failed: Invalid email format');
@@ -544,7 +547,6 @@ app.post('/api/auth/register', async (req, res) => {
       });
     }
 
-    // Validate phone format (Algerian phone numbers)
     const phoneRegex = /^[0-9]{10}$/;
     const cleanPhone = phone.replace(/\s/g, '');
     if (!phoneRegex.test(cleanPhone)) {
@@ -555,7 +557,6 @@ app.post('/api/auth/register', async (req, res) => {
       });
     }
 
-    // Check if user exists
     console.log('🔍 Checking if user exists...');
     const existingUser = await User.findOne({ 
       $or: [{ email }, { phone: cleanPhone }] 
@@ -576,7 +577,6 @@ app.post('/api/auth/register', async (req, res) => {
       }
     }
 
-    // Create user
     console.log('👤 Creating new user...');
     const user = new User({
       name: name.trim(),
@@ -590,7 +590,6 @@ app.post('/api/auth/register', async (req, res) => {
     await user.save();
     console.log('✅ User created successfully:', user.email);
 
-    // Create token
     const token = jwt.sign({ userId: user._id }, JWT_SECRET, { expiresIn: '30d' });
 
     res.status(201).json({
@@ -610,7 +609,6 @@ app.post('/api/auth/register', async (req, res) => {
   } catch (error) {
     console.error('❌ Registration error:', error);
     
-    // Handle specific MongoDB errors
     if (error.name === 'ValidationError') {
       const errorMessages = Object.values(error.errors).map(err => err.message);
       return res.status(400).json({
@@ -619,7 +617,6 @@ app.post('/api/auth/register', async (req, res) => {
       });
     }
 
-    // Handle duplicate key errors
     if (error.code === 11000) {
       const field = Object.keys(error.keyPattern)[0];
       let message = 'البيانات مستخدمة مسبقاً';
@@ -658,7 +655,6 @@ app.post('/api/auth/login', async (req, res) => {
 
     console.log('📧 Login attempt:', loginField);
 
-    // Check admin credentials first
     if (loginField === 'mamanalgeriennepartenariat@gmail.com' && password === 'anesaya75') {
       console.log('✅ Admin login successful');
       return res.json({
@@ -674,7 +670,6 @@ app.post('/api/auth/login', async (req, res) => {
       });
     }
 
-    // Find user by email or phone
     const user = await User.findOne({
       $or: [{ email: loginField }, { phone: loginField }]
     });
@@ -686,7 +681,6 @@ app.post('/api/auth/login', async (req, res) => {
       });
     }
 
-    // Check password
     const isMatch = await bcrypt.compare(password, user.password);
 
     if (!isMatch) {
@@ -696,7 +690,6 @@ app.post('/api/auth/login', async (req, res) => {
       });
     }
 
-    // Create token
     const token = jwt.sign({ userId: user._id }, JWT_SECRET, { expiresIn: '30d' });
 
     console.log('✅ Database login successful for:', user.email);
@@ -829,7 +822,6 @@ app.get('/api/articles/:id', optionalAuth, async (req, res) => {
       return res.status(404).json({ message: 'المقال غير موجود' });
     }
 
-    // Increment views
     article.views += 1;
     await article.save();
 
@@ -886,7 +878,6 @@ app.post('/api/articles', adminAuth, upload.array('images', 5), async (req, res)
     
     const { title, content, excerpt, category, featured, tags } = req.body;
 
-    // Validation with detailed logging
     if (!title) {
       console.log('❌ Missing title');
       return res.status(400).json({ 
@@ -922,7 +913,6 @@ app.post('/api/articles', adminAuth, upload.array('images', 5), async (req, res)
     const images = req.files ? req.files.map(file => file.filename) : [];
     console.log('📷 Processed images:', images);
 
-    // Ensure we have a valid author ID
     const authorId = req.userId || req.user._id || req.user.id;
     if (!authorId) {
       console.log('❌ No author ID found');
@@ -951,7 +941,6 @@ app.post('/api/articles', adminAuth, upload.array('images', 5), async (req, res)
     console.log('💾 Saving article:', article.title);
     await article.save();
     
-    // Populate author info
     await article.populate('author', 'name avatar email');
     console.log('✅ Article created successfully:', article._id);
 
@@ -968,7 +957,6 @@ app.post('/api/articles', adminAuth, upload.array('images', 5), async (req, res)
       stack: error.stack
     });
     
-    // Handle specific MongoDB validation errors
     if (error.name === 'ValidationError') {
       const errorMessages = Object.values(error.errors).map(err => err.message);
       return res.status(400).json({ 
@@ -977,7 +965,6 @@ app.post('/api/articles', adminAuth, upload.array('images', 5), async (req, res)
       });
     }
 
-    // Handle duplicate key errors
     if (error.code === 11000) {
       return res.status(400).json({ 
         success: false,
@@ -1161,7 +1148,6 @@ app.get('/api/posts/:id', optionalAuth, async (req, res) => {
       return res.status(404).json({ message: 'المنشور غير موجود' });
     }
 
-    // Increment views
     if (!req.user || post.author._id.toString() !== req.user._id.toString()) {
       post.views = (post.views || 0) + 1;
       await post.save();
@@ -1272,7 +1258,6 @@ app.post('/api/orders', async (req, res) => {
     
     const { items, customerInfo, totalPrice } = req.body;
 
-    // Validation
     if (!items || !Array.isArray(items) || items.length === 0) {
       return res.status(400).json({
         success: false,
@@ -1294,10 +1279,8 @@ app.post('/api/orders', async (req, res) => {
       });
     }
 
-    // Generate order number
     const orderNumber = 'ORD-' + Date.now().toString() + '-' + Math.random().toString(36).substr(2, 4).toUpperCase();
 
-    // Create order
     const order = new Order({
       orderNumber,
       customerInfo: {
@@ -1579,10 +1562,8 @@ app.post('/api/admin/theme', adminAuth, async (req, res) => {
   try {
     const { primaryColor, secondaryColor, textColor, lightText, bgColor, borderColor, accentColor } = req.body;
 
-    // Deactivate current theme
     await Theme.updateMany({}, { $set: { isActive: false } });
 
-    // Create new theme
     const theme = new Theme({
       name: 'custom',
       primaryColor: primaryColor || '#d4a574',
@@ -1682,11 +1663,9 @@ app.get('/api/admin/stats', adminAuth, async (req, res) => {
     };
 
     try {
-      // Calculate revenue
       const allOrders = await Order.find({ status: { $ne: 'cancelled' } });
       stats.totalRevenue = allOrders.reduce((sum, order) => sum + order.totalPrice, 0);
 
-      // Monthly revenue
       const thisMonth = new Date();
       thisMonth.setDate(1);
       const monthlyOrders = await Order.find({ 
@@ -1695,7 +1674,6 @@ app.get('/api/admin/stats', adminAuth, async (req, res) => {
       });
       stats.monthlyRevenue = monthlyOrders.reduce((sum, order) => sum + order.totalPrice, 0);
 
-      // Top products (by order frequency)
       const productStats = await Order.aggregate([
         { $unwind: '$items' },
         { $group: { 
@@ -1708,7 +1686,6 @@ app.get('/api/admin/stats', adminAuth, async (req, res) => {
       ]);
       stats.topProducts = productStats;
 
-      // Recent orders
       stats.recentOrders = await Order.find({})
         .sort({ createdAt: -1 })
         .limit(5)
