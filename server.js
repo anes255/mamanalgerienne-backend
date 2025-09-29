@@ -117,33 +117,25 @@ function setupFullRoutes() {
 }
 
 // Setup fallback routes when database is not available
-// ✅ FIXED: Now returns valid ObjectId format instead of "1"
 function setupFallbackRoutes() {
   console.log('Setting up fallback routes...');
   
-  // Use a valid ObjectId format (24 hex characters)
-  const FALLBACK_ADMIN_ID = '507f1f77bcf86cd799439011';
-  
   // Basic auth for admin panel
   app.post('/api/auth/login', (req, res) => {
-    const { email, username, password } = req.body;
-    const loginField = email || username;
+    const { email, password } = req.body;
     
-    if (loginField === 'mamanalgeriennepartenariat@gmail.com' && password === 'anesaya75') {
+    if (email === 'mamanalgeriennepartenariat@gmail.com' && password === 'anesaya75') {
       res.json({
-        success: true,
-        message: 'تم تسجيل الدخول بنجاح',
         token: 'test-admin-token',
         user: {
-          _id: FALLBACK_ADMIN_ID,
-          id: FALLBACK_ADMIN_ID,
+          id: '1',
           name: 'مدير الموقع',
           email: 'mamanalgeriennepartenariat@gmail.com',
           isAdmin: true
         }
       });
     } else {
-      res.status(400).json({ success: false, message: 'بيانات الدخول غير صحيحة' });
+      res.status(400).json({ message: 'بيانات الدخول غير صحيحة' });
     }
   });
   
@@ -151,17 +143,15 @@ function setupFallbackRoutes() {
     const token = req.headers.authorization?.replace('Bearer ', '');
     if (token === 'test-admin-token') {
       res.json({
-        success: true,
         user: {
-          _id: FALLBACK_ADMIN_ID,
-          id: FALLBACK_ADMIN_ID,
+          id: '1',
           name: 'مدير الموقع',
           email: 'mamanalgeriennepartenariat@gmail.com',
           isAdmin: true
         }
       });
     } else {
-      res.status(401).json({ success: false, message: 'غير مصرح' });
+      res.status(401).json({ message: 'غير مصرح' });
     }
   });
   
@@ -273,17 +263,47 @@ async function createAdminUser() {
   }
 }
 
+// Graceful shutdown
+let server;
+
+process.on('SIGTERM', () => {
+  console.log('SIGTERM signal received: closing HTTP server');
+  if (server) {
+    server.close(() => {
+      console.log('HTTP server closed');
+      mongoose.connection.close(false, () => {
+        console.log('MongoDB connection closed');
+        process.exit(0);
+      });
+    });
+  }
+});
+
+process.on('SIGINT', () => {
+  console.log('SIGINT signal received: closing HTTP server');
+  if (server) {
+    server.close(() => {
+      console.log('HTTP server closed');
+      mongoose.connection.close(false, () => {
+        console.log('MongoDB connection closed');
+        process.exit(0);
+      });
+    });
+  }
+});
+
 // Initialize server
 async function startServer() {
-  console.log('🚀 Starting server...');
+  console.log('🚀 Starting Maman Algerienne server...');
   console.log('Environment:', process.env.NODE_ENV || 'development');
-  console.log('Frontend URL:', process.env.FRONTEND_URL || 'not set');
+  console.log('Frontend URL:', process.env.FRONTEND_URL || 'https://maman-algerienne.onrender.com');
   
   // Try to connect to MongoDB Atlas
   const dbConnected = await connectToAtlas();
   
   if (!dbConnected) {
     // Use fallback routes if database connection fails
+    console.log('📋 Setting up fallback routes instead...');
     setupFallbackRoutes();
   }
   
@@ -295,7 +315,7 @@ async function startServer() {
 
   // 404 handler - MUST be LAST
   app.use('*', (req, res) => {
-    console.log(`404 - Route not found: ${req.method} ${req.originalUrl}`);
+    console.log(`${new Date().toISOString()} - ${req.method} ${req.originalUrl}`);
     res.status(404).json({ 
       message: 'Route not found', 
       path: req.originalUrl,
@@ -303,31 +323,54 @@ async function startServer() {
     });
   });
 
-  // Start server
+  // Get PORT from environment (Render.com provides this)
   const PORT = process.env.PORT || 5000;
-  app.listen(PORT, () => {
-    console.log(`\n🚀 Server running on port ${PORT}`);
-    console.log(`📊 Health check: http://localhost:${PORT}/health`);
-    console.log(`🧪 API Test: http://localhost:${PORT}/api/test`);
-    console.log(`📰 Articles: http://localhost:${PORT}/api/articles`);
-    console.log(`🛍️ Products: http://localhost:${PORT}/api/products`);
-    console.log(`📢 Posts: http://localhost:${PORT}/api/posts`);
-    console.log(`\n🔧 Admin login credentials:`);
-    console.log(`   Email: mamanalgeriennepartenariat@gmail.com`);
-    console.log(`   Password: anesaya75\n`);
-    
-    if (dbConnected) {
-      console.log('✅ Server ready with MongoDB Atlas');
-    } else {
-      console.log('⚠️ Server running in fallback mode');
-      console.log('🔍 To fix: Check MongoDB Atlas connection string and credentials');
-    }
-  });
+  
+  // Start server with error handling
+  try {
+    server = app.listen(PORT, '0.0.0.0', () => {
+      console.log(`\n🌟 Maman Algerienne Server running on port ${PORT}`);
+      console.log(`📊 Health check: http://localhost:${PORT}/health`);
+      console.log(`🧪 API Test: http://localhost:${PORT}/api/test`);
+      console.log(`📰 Articles: http://localhost:${PORT}/api/articles`);
+      console.log(`🛍️ Products: http://localhost:${PORT}/api/products`);
+      console.log(`📢 Posts: http://localhost:${PORT}/api/posts`);
+      console.log(`\n🔧 Admin login credentials:`);
+      console.log(`   Email: mamanalgeriennepartenariat@gmail.com`);
+      console.log(`   Password: anesaya75\n`);
+      
+      if (dbConnected) {
+        console.log('✅ Server ready with MongoDB Atlas');
+      } else {
+        console.log('⚠️ Server running with fallback routes');
+        console.log('🔍 To fix: Check MongoDB Atlas connection string and credentials');
+      }
+      console.log('════════════════════════════════════════════════════════════');
+    });
+
+    // Handle server errors
+    server.on('error', (error) => {
+      if (error.code === 'EADDRINUSE') {
+        console.error(`❌ Port ${PORT} is already in use`);
+        console.log('💡 Solution: Stop the existing server or use a different port');
+        console.log('💡 On Render.com: This usually means deployment is restarting');
+        console.log('💡 Wait for the old instance to shut down...');
+        process.exit(1);
+      } else {
+        console.error('❌ Server error:', error);
+        process.exit(1);
+      }
+    });
+
+  } catch (error) {
+    console.error('❌ Failed to start server:', error);
+    process.exit(1);
+  }
 }
 
 // Start the server
 startServer().catch(error => {
-  console.error('Failed to start server:', error);
+  console.error('❌ Unhandled error during server startup:', error);
   process.exit(1);
 });
 
