@@ -1,4 +1,4 @@
-require('dotenv').config();
+require('dotenv').config(); // Load environment variables
 
 const express = require('express');
 const mongoose = require('mongoose');
@@ -8,189 +8,326 @@ const path = require('path');
 
 const app = express();
 
-// Create directories
-['./uploads/articles', './uploads/products', './uploads/posts', './uploads/avatars'].forEach(dir => {
-  if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+// Create uploads directories if they don't exist
+const uploadsDir = './uploads';
+const dirs = ['./uploads/articles', './uploads/products', './uploads/posts', './uploads/avatars'];
+
+dirs.forEach(dir => {
+  if (!fs.existsSync(dir)) {
+    fs.mkdirSync(dir, { recursive: true });
+    console.log(`Created directory: ${dir}`);
+  }
 });
 
-// CORS
-app.use(cors({ origin: '*', credentials: true, methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'], allowedHeaders: ['Content-Type', 'Authorization'] }));
+// CORS Configuration
+const corsOptions = {
+  origin: function (origin, callback) {
+    // Allow requests with no origin (like mobile apps or curl requests)
+    if (!origin) return callback(null, true);
+    
+    // Allow your frontend URL and localhost for development
+    const allowedOrigins = [
+      process.env.FRONTEND_URL || 'https://maman-algerienne.onrender.com',
+      'http://localhost:3000',
+      'http://127.0.0.1:3000',
+      'https://maman-algerienne.onrender.com'
+    ];
+    
+    if (allowedOrigins.indexOf(origin) !== -1) {
+      callback(null, true);
+    } else {
+      console.log('Blocked by CORS:', origin);
+      callback(new Error('Not allowed by CORS'));
+    }
+  },
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization']
+};
+
+app.use(cors(corsOptions));
 
 // Middleware
-app.use(express.json({ limit: '10mb' }));
-app.use(express.urlencoded({ extended: true, limit: '10mb' }));
-app.use('/uploads', express.static(path.join(__dirname, './uploads')));
+app.use(express.json({ limit: process.env.MAX_FILE_SIZE || '10mb' }));
+app.use(express.urlencoded({ extended: true, limit: process.env.MAX_FILE_SIZE || '10mb' }));
 
-// Health
+// Serve static files from uploads directory
+app.use('/uploads', express.static(path.join(__dirname, process.env.UPLOAD_PATH || './uploads')));
+
+// Serve static files in production
+if (process.env.NODE_ENV === 'production') {
+  app.use(express.static(path.join(__dirname, 'public')));
+}
+
+// Health check
 app.get('/health', (req, res) => {
-  res.json({ status: 'OK', dbStatus: mongoose.connection.readyState === 1 ? 'Connected' : 'Disconnected', timestamp: new Date().toISOString() });
+  res.json({ 
+    status: 'OK', 
+    message: 'Server is running',
+    timestamp: new Date().toISOString(),
+    dbStatus: mongoose.connection.readyState === 1 ? 'Connected' : 'Disconnected',
+    environment: process.env.NODE_ENV || 'development'
+  });
 });
 
+// Test route
 app.get('/api/test', (req, res) => {
-  res.json({ message: 'API working', dbConnected: mongoose.connection.readyState === 1, database: mongoose.connection.name || 'not connected' });
+  res.json({ 
+    message: 'API is working', 
+    routes: 'loaded',
+    environment: process.env.NODE_ENV || 'development',
+    frontendUrl: process.env.FRONTEND_URL || 'not set'
+  });
 });
 
+// Global flag to track if routes are loaded
 let routesLoaded = false;
 
-// Connect to MongoDB
-async function connectDB() {
-  try {
-    const MONGODB_URI = process.env.MONGODB_URI || 'mongodb+srv://mamanalgerienne:anesaya75@cluster0.iqodm96.mongodb.net/mama-algerienne?retryWrites=true&w=majority&appName=Cluster0';
-    
-    console.log('🔌 Connecting to MongoDB...');
-    await mongoose.connect(MONGODB_URI, { serverSelectionTimeoutMS: 10000, socketTimeoutMS: 45000 });
-    
-    console.log('✅ MongoDB connected!');
-    console.log('📊 Database:', mongoose.connection.name);
-    
-    await createAdmin();
-    loadRoutes();
-    return true;
-  } catch (error) {
-    console.error('❌ MongoDB failed:', error.message);
-    setupFallback();
-    return false;
-  }
-}
-
-// Create admin
-async function createAdmin() {
-  try {
-    const User = require('./models/User');
-    let admin = await User.findOne({ email: 'mamanalgeriennepartenariat@gmail.com' });
-    
-    if (!admin) {
-      admin = new User({
-        name: 'مدير الموقع',
-        email: 'mamanalgeriennepartenariat@gmail.com',
-        phone: '0555123456',
-        password: 'anesaya75',
-        isAdmin: true,
-        status: 'active'
-      });
-      await admin.save();
-      console.log('✅ Admin created!');
-    } else {
-      if (!admin.isAdmin) {
-        admin.isAdmin = true;
-        await admin.save();
-      }
-      console.log('✅ Admin exists');
-    }
-    console.log('🆔 Admin ID:', admin._id);
-  } catch (error) {
-    console.error('❌ Admin creation failed:', error.message);
-  }
-}
-
-// Load routes
-function loadRoutes() {
+// Setup full API routes
+function setupFullRoutes() {
   if (routesLoaded) return;
+  
   try {
-    console.log('📋 Loading routes...');
-    app.use('/api/auth', require('./routes/auth'));
-    app.use('/api/articles', require('./routes/articles'));
-    app.use('/api/products', require('./routes/products'));
-    app.use('/api/posts', require('./routes/posts'));
-    app.use('/api/comments', require('./routes/comments'));
-    app.use('/api/orders', require('./routes/Orders'));
-    app.use('/api/admin', require('./routes/admin'));
+    console.log('Setting up full API routes...');
+    
+    // Import and use routes
+    const authRoutes = require('./routes/auth');
+    const articleRoutes = require('./routes/articles');
+    const productRoutes = require('./routes/products');
+    const postRoutes = require('./routes/posts');
+    const commentRoutes = require('./routes/comments');
+    const adminRoutes = require('./routes/admin');
+    const orderRoutes = require('./routes/Orders');
+
+    app.use('/api/orders', orderRoutes);
+    app.use('/api/auth', authRoutes);
+    app.use('/api/articles', articleRoutes);
+    app.use('/api/products', productRoutes);
+    app.use('/api/posts', postRoutes);
+    app.use('/api/comments', commentRoutes);
+    app.use('/api/admin', adminRoutes);
+    
     routesLoaded = true;
-    console.log('✅ Routes loaded');
+    console.log('✅ All API routes loaded successfully');
+    
   } catch (error) {
-    console.error('❌ Routes failed:', error.message);
+    console.error('Error loading routes:', error.message);
+    setupFallbackRoutes();
   }
 }
 
-// Fallback
-function setupFallback() {
-  console.log('⚠️ Fallback mode...');
+// Setup fallback routes when database is not available
+// ✅ FIXED: Now returns valid ObjectId format instead of "1"
+function setupFallbackRoutes() {
+  console.log('Setting up fallback routes...');
   
-  const fakeId = '507f1f77bcf86cd799439011';
-  const storage = { articles: [], products: [], posts: [], orders: [] };
+  // Use a valid ObjectId format (24 hex characters)
+  const FALLBACK_ADMIN_ID = '507f1f77bcf86cd799439011';
   
+  // Basic auth for admin panel
   app.post('/api/auth/login', (req, res) => {
     const { email, username, password } = req.body;
-    if ((email || username) === 'mamanalgeriennepartenariat@gmail.com' && password === 'anesaya75') {
-      res.json({ success: true, token: 'fallback-token', user: { _id: fakeId, id: fakeId, name: 'مدير الموقع', email: 'mamanalgeriennepartenariat@gmail.com', isAdmin: true } });
+    const loginField = email || username;
+    
+    if (loginField === 'mamanalgeriennepartenariat@gmail.com' && password === 'anesaya75') {
+      res.json({
+        success: true,
+        message: 'تم تسجيل الدخول بنجاح',
+        token: 'test-admin-token',
+        user: {
+          _id: FALLBACK_ADMIN_ID,
+          id: FALLBACK_ADMIN_ID,
+          name: 'مدير الموقع',
+          email: 'mamanalgeriennepartenariat@gmail.com',
+          isAdmin: true
+        }
+      });
     } else {
-      res.status(400).json({ success: false, message: 'بيانات خاطئة' });
+      res.status(400).json({ success: false, message: 'بيانات الدخول غير صحيحة' });
     }
   });
   
   app.get('/api/auth/me', (req, res) => {
     const token = req.headers.authorization?.replace('Bearer ', '');
-    if (token === 'fallback-token') {
-      res.json({ success: true, user: { _id: fakeId, id: fakeId, name: 'مدير الموقع', email: 'mamanalgeriennepartenariat@gmail.com', isAdmin: true } });
+    if (token === 'test-admin-token') {
+      res.json({
+        success: true,
+        user: {
+          _id: FALLBACK_ADMIN_ID,
+          id: FALLBACK_ADMIN_ID,
+          name: 'مدير الموقع',
+          email: 'mamanalgeriennepartenariat@gmail.com',
+          isAdmin: true
+        }
+      });
     } else {
       res.status(401).json({ success: false, message: 'غير مصرح' });
     }
   });
   
-  app.get('/api/articles', (req, res) => res.json({ articles: storage.articles, pagination: { current: 1, pages: 1, total: storage.articles.length } }));
-  app.post('/api/articles', (req, res) => {
-    const article = { _id: Date.now().toString(), ...req.body, author: { _id: fakeId, name: 'Admin' }, images: [], published: true, createdAt: new Date().toISOString(), views: 0, likes: [] };
-    storage.articles.push(article);
-    res.status(201).json({ message: 'تم إنشاء المقال', article });
+  // Empty data routes
+  const emptyRoutes = [
+    '/api/articles',
+    '/api/products', 
+    '/api/posts',
+    '/api/comments'
+  ];
+  
+  emptyRoutes.forEach(route => {
+    app.get(route, (req, res) => {
+      res.json({
+        articles: [],
+        products: [],
+        posts: [],
+        comments: [],
+        pagination: { current: 1, pages: 0, total: 0 }
+      });
+    });
+    
+    app.get(`${route}/:id`, (req, res) => {
+      res.status(404).json({ message: 'Item not found' });
+    });
+    
+    app.post(route, (req, res) => {
+      res.status(503).json({ 
+        message: 'Database not available. Please check MongoDB Atlas connection.' 
+      });
+    });
   });
-  app.delete('/api/articles/:id', (req, res) => {
-    const idx = storage.articles.findIndex(a => a._id === req.params.id);
-    if (idx > -1) { storage.articles.splice(idx, 1); res.json({ message: 'تم الحذف' }); } else { res.status(404).json({ message: 'غير موجود' }); }
+
+  // Admin dashboard route
+  app.get('/api/admin/dashboard', (req, res) => {
+    res.json({
+      counts: { articles: 0, products: 0, posts: 0, users: 1, comments: 0 },
+      stats: { todayViews: 0, pendingComments: 0, newUsersThisWeek: 0, popularCategory: 'عام' }
+    });
   });
   
-  app.get('/api/products', (req, res) => res.json({ products: storage.products, pagination: { current: 1, pages: 1, total: storage.products.length } }));
-  app.post('/api/products', (req, res) => {
-    const product = { _id: Date.now().toString(), ...req.body, seller: { _id: fakeId, name: 'Admin' }, images: [], inStock: true, createdAt: new Date().toISOString(), views: 0, likes: [] };
-    storage.products.push(product);
-    res.status(201).json({ message: 'تم إضافة المنتج', product });
-  });
-  app.delete('/api/products/:id', (req, res) => {
-    const idx = storage.products.findIndex(p => p._id === req.params.id);
-    if (idx > -1) { storage.products.splice(idx, 1); res.json({ message: 'تم الحذف' }); } else { res.status(404).json({ message: 'غير موجود' }); }
-  });
-  
-  app.get('/api/posts', (req, res) => res.json({ posts: storage.posts, pagination: { current: 1, pages: 1, total: storage.posts.length } }));
-  app.post('/api/posts/ad', (req, res) => {
-    const post = { _id: Date.now().toString(), ...req.body, author: { _id: fakeId, name: 'Admin' }, type: 'ad', images: [], approved: true, createdAt: new Date().toISOString(), views: 0, likes: [] };
-    storage.posts.push(post);
-    res.status(201).json({ message: 'تم إنشاء الإعلان', post });
-  });
-  app.delete('/api/posts/:id', (req, res) => {
-    const idx = storage.posts.findIndex(p => p._id === req.params.id);
-    if (idx > -1) { storage.posts.splice(idx, 1); res.json({ message: 'تم الحذف' }); } else { res.status(404).json({ message: 'غير موجود' }); }
-  });
-  
-  app.get('/api/orders', (req, res) => res.json({ orders: storage.orders, pagination: { current: 1, pages: 1, total: storage.orders.length } }));
-  app.get('/api/comments', (req, res) => res.json({ comments: [], pagination: { current: 1, pages: 0, total: 0 } }));
-  app.get('/api/admin/comments', (req, res) => res.json({ comments: [], pagination: { current: 1, pages: 0, total: 0 } }));
-  
-  console.log('✅ Fallback ready');
+  console.log('✅ Fallback routes set up');
 }
 
-// Start
-async function start() {
-  console.log('🚀 Starting Maman Algerienne Backend\n');
+// MongoDB Atlas connection
+async function connectToAtlas() {
+  try {
+    const MONGODB_URI = process.env.MONGODB_URI || 'mongodb+srv://mamanalgerienne:anesaya75@cluster0.iqodm96.mongodb.net/mama-algerienne?retryWrites=true&w=majority&appName=Cluster0';
+    
+    console.log('Connecting to MongoDB Atlas...');
+    
+    await mongoose.connect(MONGODB_URI, {
+      useNewUrlParser: true,
+      useUnifiedTopology: true,
+    });
+    
+    console.log('✅ Connected to MongoDB Atlas successfully');
+    
+    // Create admin user after connection
+    await createAdminUser();
+    
+    // Load full routes
+    setupFullRoutes();
+    
+    return true;
+  } catch (error) {
+    console.error('❌ MongoDB Atlas connection failed:', error.message);
+    
+    if (error.message.includes('authentication failed')) {
+      console.log('🔐 Please check your database password in the connection string');
+      console.log('🔐 Make sure to replace YOUR_PASSWORD with your actual password');
+    }
+    
+    return false;
+  }
+}
+
+// Create admin user
+async function createAdminUser() {
+  try {
+    const User = require('./models/User');
+    
+    const existingAdmin = await User.findOne({ 
+      email: 'mamanalgeriennepartenariat@gmail.com' 
+    });
+    
+    if (!existingAdmin) {
+      const admin = new User({
+        name: 'مدير الموقع',
+        email: 'mamanalgeriennepartenariat@gmail.com',
+        phone: '0555123456',
+        password: 'anesaya75',
+        isAdmin: true
+      });
+      
+      await admin.save();
+      console.log('✅ Admin user created successfully');
+    } else {
+      if (!existingAdmin.isAdmin) {
+        existingAdmin.isAdmin = true;
+        await existingAdmin.save();
+        console.log('✅ Existing user promoted to admin');
+      } else {
+        console.log('✅ Admin user already exists');
+      }
+    }
+  } catch (error) {
+    console.error('Error creating admin user:', error.message);
+  }
+}
+
+// Initialize server
+async function startServer() {
+  console.log('🚀 Starting server...');
+  console.log('Environment:', process.env.NODE_ENV || 'development');
+  console.log('Frontend URL:', process.env.FRONTEND_URL || 'not set');
   
-  const dbOk = await connectDB();
+  // Try to connect to MongoDB Atlas
+  const dbConnected = await connectToAtlas();
   
+  if (!dbConnected) {
+    // Use fallback routes if database connection fails
+    setupFallbackRoutes();
+  }
+  
+  // Error handling middleware
   app.use((err, req, res, next) => {
-    console.error('Error:', err.message);
-    res.status(500).json({ message: 'Server error' });
+    console.error('Server error:', err.message);
+    res.status(500).json({ message: 'Server error', error: err.message });
   });
-  
-  app.use('*', (req, res) => res.status(404).json({ message: 'Not found' }));
-  
-  const PORT = process.env.PORT || 10000;
-  app.listen(PORT, '0.0.0.0', () => {
-    console.log(`\n✅ Server running on port ${PORT}`);
-    console.log(`📊 Health: https://mamanalgerienne-backend.onrender.com/health`);
-    console.log(`🔐 Login: mamanalgeriennepartenariat@gmail.com / anesaya75`);
-    console.log(dbOk ? '✅ MongoDB connected' : '⚠️ Fallback mode\n');
+
+  // 404 handler - MUST be LAST
+  app.use('*', (req, res) => {
+    console.log(`404 - Route not found: ${req.method} ${req.originalUrl}`);
+    res.status(404).json({ 
+      message: 'Route not found', 
+      path: req.originalUrl,
+      method: req.method
+    });
+  });
+
+  // Start server
+  const PORT = process.env.PORT || 5000;
+  app.listen(PORT, () => {
+    console.log(`\n🚀 Server running on port ${PORT}`);
+    console.log(`📊 Health check: http://localhost:${PORT}/health`);
+    console.log(`🧪 API Test: http://localhost:${PORT}/api/test`);
+    console.log(`📰 Articles: http://localhost:${PORT}/api/articles`);
+    console.log(`🛍️ Products: http://localhost:${PORT}/api/products`);
+    console.log(`📢 Posts: http://localhost:${PORT}/api/posts`);
+    console.log(`\n🔧 Admin login credentials:`);
+    console.log(`   Email: mamanalgeriennepartenariat@gmail.com`);
+    console.log(`   Password: anesaya75\n`);
+    
+    if (dbConnected) {
+      console.log('✅ Server ready with MongoDB Atlas');
+    } else {
+      console.log('⚠️ Server running in fallback mode');
+      console.log('🔍 To fix: Check MongoDB Atlas connection string and credentials');
+    }
   });
 }
 
-start().catch(err => {
-  console.error('Startup failed:', err);
+// Start the server
+startServer().catch(error => {
+  console.error('Failed to start server:', error);
   process.exit(1);
 });
 
