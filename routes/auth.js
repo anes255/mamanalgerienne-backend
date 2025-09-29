@@ -2,9 +2,12 @@ const express = require('express');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const User = require('../models/User');
-const auth = require('../middleware/auth');
+const { auth } = require('../middleware/auth');
 
 const router = express.Router();
+
+// JWT Secret
+const JWT_SECRET = process.env.JWT_SECRET || 'maman-algerienne-secret-key-2024';
 
 // Register
 router.post('/register', async (req, res) => {
@@ -58,7 +61,7 @@ router.post('/register', async (req, res) => {
     // Create token
     const token = jwt.sign(
       { userId: user._id },
-      process.env.JWT_SECRET || 'fallback-secret-key',
+      JWT_SECRET,
       { expiresIn: '30d' }
     );
 
@@ -68,6 +71,7 @@ router.post('/register', async (req, res) => {
       token,
       user: {
         id: user._id,
+        _id: user._id,
         name: user.name,
         email: user.email,
         phone: user.phone,
@@ -88,7 +92,7 @@ router.post('/register', async (req, res) => {
 // Login - FIXED VERSION
 router.post('/login', async (req, res) => {
   try {
-    console.log('Login request body:', req.body);
+    console.log('🔑 Login request body:', req.body);
     
     // Extract email/username and password - handle both field names
     const { email, username, password } = req.body;
@@ -102,7 +106,7 @@ router.post('/login', async (req, res) => {
       });
     }
 
-    console.log('Looking for user with:', loginField);
+    console.log('🔍 Looking for user with:', loginField);
 
     // Find user by email or phone
     const user = await User.findOne({
@@ -113,43 +117,45 @@ router.post('/login', async (req, res) => {
     });
 
     if (!user) {
-      console.log('User not found');
+      console.log('❌ User not found');
       return res.status(400).json({
         success: false,
         message: 'بيانات الدخول غير صحيحة'
       });
     }
 
-    console.log('User found:', user.email);
+    console.log('✅ User found:', user.email, 'ID:', user._id);
 
     // Check password
     const isMatch = await bcrypt.compare(password, user.password);
 
     if (!isMatch) {
-      console.log('Password mismatch');
+      console.log('❌ Password mismatch');
       return res.status(400).json({
         success: false,
         message: 'بيانات الدخول غير صحيحة'
       });
     }
 
-    console.log('Password matches');
+    console.log('✅ Password matches');
 
-    // Create token
+    // Create token with proper user ID
     const token = jwt.sign(
       { userId: user._id },
-      process.env.JWT_SECRET || 'fallback-secret-key',
+      JWT_SECRET,
       { expiresIn: '30d' }
     );
 
-    console.log('Login successful for:', user.email);
+    console.log('✅ Login successful for:', user.email, 'Token generated');
 
+    // Return user data with both id and _id for compatibility
     res.json({
       success: true,
       message: 'تم تسجيل الدخول بنجاح',
       token,
       user: {
         id: user._id,
+        _id: user._id,
         name: user.name,
         email: user.email,
         phone: user.phone,
@@ -159,18 +165,20 @@ router.post('/login', async (req, res) => {
     });
 
   } catch (error) {
-    console.error('Login error:', error);
+    console.error('❌ Login error:', error);
     res.status(500).json({
       success: false,
-      message: 'خطأ في الخادم'
+      message: 'خطأ في الخادم',
+      error: error.message
     });
   }
 });
 
-// Get current user
+// Get current user - FIXED to use req.user instead of req.userId
 router.get('/me', auth, async (req, res) => {
   try {
-    const user = await User.findById(req.userId).select('-password');
+    // req.user is set by the auth middleware
+    const user = await User.findById(req.user._id).select('-password');
     
     if (!user) {
       return res.status(404).json({
@@ -183,6 +191,7 @@ router.get('/me', auth, async (req, res) => {
       success: true,
       user: {
         id: user._id,
+        _id: user._id,
         name: user.name,
         email: user.email,
         phone: user.phone,
@@ -199,12 +208,12 @@ router.get('/me', auth, async (req, res) => {
   }
 });
 
-// Update profile
+// Update profile - FIXED to use req.user instead of req.userId
 router.put('/profile', auth, async (req, res) => {
   try {
     const { name, phone } = req.body;
 
-    const user = await User.findById(req.userId);
+    const user = await User.findById(req.user._id);
     
     if (!user) {
       return res.status(404).json({
@@ -224,6 +233,7 @@ router.put('/profile', auth, async (req, res) => {
       message: 'تم تحديث الملف الشخصي بنجاح',
       user: {
         id: user._id,
+        _id: user._id,
         name: user.name,
         email: user.email,
         phone: user.phone,
@@ -241,7 +251,7 @@ router.put('/profile', auth, async (req, res) => {
   }
 });
 
-// Change password
+// Change password - FIXED to use req.user instead of req.userId
 router.put('/password', auth, async (req, res) => {
   try {
     const { currentPassword, newPassword, confirmPassword } = req.body;
@@ -267,7 +277,7 @@ router.put('/password', auth, async (req, res) => {
       });
     }
 
-    const user = await User.findById(req.userId);
+    const user = await User.findById(req.user._id);
     
     if (!user) {
       return res.status(404).json({
@@ -297,6 +307,22 @@ router.put('/password', auth, async (req, res) => {
 
   } catch (error) {
     console.error('Change password error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'خطأ في الخادم'
+    });
+  }
+});
+
+// Logout (client-side token removal, but endpoint for consistency)
+router.post('/logout', auth, async (req, res) => {
+  try {
+    res.json({
+      success: true,
+      message: 'تم تسجيل الخروج بنجاح'
+    });
+  } catch (error) {
+    console.error('Logout error:', error);
     res.status(500).json({
       success: false,
       message: 'خطأ في الخادم'
