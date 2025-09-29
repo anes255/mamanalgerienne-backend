@@ -1,26 +1,45 @@
 require('dotenv').config();
-
 const express = require('express');
 const mongoose = require('mongoose');
 const cors = require('cors');
 const fs = require('fs');
 const path = require('path');
+const net = require('net');
 
 const app = express();
 
-// Prevent multiple server instances
+// ============= CRITICAL: Check if port is available =============
+function isPortAvailable(port) {
+  return new Promise((resolve) => {
+    const server = net.createServer();
+    server.once('error', (err) => {
+      if (err.code === 'EADDRINUSE') {
+        resolve(false);
+      } else {
+        resolve(false);
+      }
+    });
+    server.once('listening', () => {
+      server.close();
+      resolve(true);
+    });
+    server.listen(port, '0.0.0.0');
+  });
+}
+
+// Prevent multiple instances
 if (global.serverInstance) {
-  console.log('⚠️  Server already running, skipping initialization');
+  console.log('⚠️  Server already running, exiting...');
   process.exit(0);
 }
 global.serverInstance = true;
 
-// Create uploads directories
+// Create directories
 const dirs = ['./uploads/articles', './uploads/products', './uploads/posts', './uploads/avatars'];
 dirs.forEach(dir => {
   if (!fs.existsSync(dir)) {
     fs.mkdirSync(dir, { recursive: true });
-    console.log(`Created directory: ${dir}`);
+    console.log(`Created: ${dir}`);
   }
 });
 
@@ -28,13 +47,13 @@ dirs.forEach(dir => {
 const corsOptions = {
   origin: function (origin, callback) {
     if (!origin) return callback(null, true);
-    const allowedOrigins = [
+    const allowed = [
       process.env.FRONTEND_URL || 'https://maman-algerienne.onrender.com',
       'http://localhost:3000',
       'http://127.0.0.1:3000',
       'https://maman-algerienne.onrender.com'
     ];
-    if (allowedOrigins.indexOf(origin) !== -1) {
+    if (allowed.indexOf(origin) !== -1) {
       callback(null, true);
     } else {
       console.log('Blocked by CORS:', origin);
@@ -58,7 +77,7 @@ if (process.env.NODE_ENV === 'production') {
 // Health check
 app.get('/health', (req, res) => {
   res.json({ 
-    status: 'OK', 
+    status: 'OK',
     message: 'Server is running',
     timestamp: new Date().toISOString(),
     dbStatus: mongoose.connection.readyState === 1 ? 'Connected' : 'Disconnected',
@@ -69,7 +88,7 @@ app.get('/health', (req, res) => {
 // Test route
 app.get('/api/test', (req, res) => {
   res.json({ 
-    message: 'API is working', 
+    message: 'API working', 
     routes: 'loaded',
     environment: process.env.NODE_ENV || 'development',
     frontendUrl: process.env.FRONTEND_URL || 'not set'
@@ -153,9 +172,11 @@ function setupFallbackRoutes() {
         pagination: { current: 1, pages: 0, total: 0 }
       });
     });
+    
     app.get(`${route}/:id`, (req, res) => {
       res.status(404).json({ message: 'Item not found' });
     });
+    
     app.post(route, (req, res) => {
       res.status(503).json({ message: 'Database not available' });
     });
@@ -173,10 +194,10 @@ function setupFallbackRoutes() {
 
 async function connectToAtlas() {
   try {
-    const MONGODB_URI = process.env.MONGODB_URI || 'mongodb+srv://mamanalgerienne:anesaya75@cluster0.iqodm96.mongodb.net/mama-algerienne?retryWrites=true&w=majority&appName=Cluster0';
+    const uri = process.env.MONGODB_URI || 'mongodb+srv://mamanalgerienne:anesaya75@cluster0.iqodm96.mongodb.net/mama-algerienne?retryWrites=true&w=majority&appName=Cluster0';
     console.log('Connecting to MongoDB Atlas...');
     
-    await mongoose.connect(MONGODB_URI, {
+    await mongoose.connect(uri, {
       useNewUrlParser: true,
       useUnifiedTopology: true,
     });
@@ -259,6 +280,26 @@ async function startServer() {
   console.log('Environment:', process.env.NODE_ENV || 'development');
   console.log('Frontend URL:', process.env.FRONTEND_URL || 'https://maman-algerienne.onrender.com');
   
+  const PORT = process.env.PORT || 5000;
+  
+  // ============= CRITICAL: Check port before starting =============
+  console.log(`\n🔍 Checking if port ${PORT} is available...`);
+  const available = await isPortAvailable(PORT);
+  
+  if (!available) {
+    console.error(`\n❌❌❌ CRITICAL ERROR ❌❌❌`);
+    console.error(`Port ${PORT} IS ALREADY IN USE!`);
+    console.error(`\n🔧 SOLUTIONS:`);
+    console.error(`  1. In Render Dashboard: Settings → "Restart Service"`);
+    console.error(`  2. Wait 30 seconds for old instance to shut down`);
+    console.error(`  3. Check Render logs for multiple "Starting server" messages`);
+    console.error(`  4. Verify you have a Procfile with ONLY: web: node server.js`);
+    console.error(`  5. Contact Render support if issue persists\n`);
+    process.exit(1);
+  }
+  
+  console.log(`✅ Port ${PORT} is available!\n`);
+  
   const dbConnected = await connectToAtlas();
   
   if (!dbConnected) {
@@ -280,26 +321,24 @@ async function startServer() {
     });
   });
 
-  const PORT = process.env.PORT || 5000;
-  
   try {
     server = app.listen(PORT, '0.0.0.0', () => {
-      console.log(`\n🌟 Maman Algerienne Server running on port ${PORT}`);
+      console.log(`\n✅✅✅ SERVER STARTED SUCCESSFULLY ✅✅✅`);
+      console.log(`🌟 Maman Algerienne Server running on port ${PORT}`);
       console.log(`📊 Health: https://mamanalgerienne-backend.onrender.com/health`);
       console.log(`🧪 Test: https://mamanalgerienne-backend.onrender.com/api/test`);
-      console.log(`\n🔧 Admin: mamanalgeriennepartenariat@gmail.com / anesaya75`);
-      console.log(dbConnected ? '✅ MongoDB Atlas connected' : '⚠️  Fallback mode');
-      console.log('════════════════════════════════════════════════════════════');
+      console.log(`\n🔧 Admin credentials:`);
+      console.log(`   Email: mamanalgeriennepartenariat@gmail.com`);
+      console.log(`   Password: anesaya75`);
+      console.log(`\n${dbConnected ? '✅ MongoDB Atlas connected' : '⚠️  Fallback mode (no database)'}`);
+      console.log('════════════════════════════════════════════════════════════\n');
     });
 
     server.on('error', (error) => {
       if (error.code === 'EADDRINUSE') {
-        console.error(`\n❌ PORT ${PORT} IS ALREADY IN USE`);
-        console.log('💡 SOLUTIONS:');
-        console.log('  1. Kill existing process: pkill -f "node server.js"');
-        console.log('  2. On Render: Wait 30s for old instance to stop');
-        console.log('  3. Check package.json - only "start": "node server.js"');
-        console.log('  4. Restart Render service with "Clear cache & deploy"\n');
+        console.error(`\n❌ FATAL ERROR: Port ${PORT} in use AFTER availability check!`);
+        console.error('This indicates a race condition or multiple deployments.');
+        console.error('Please contact Render support immediately.\n');
         process.exit(1);
       } else {
         console.error('❌ Server error:', error);
@@ -315,7 +354,7 @@ async function startServer() {
 
 if (require.main === module) {
   startServer().catch(error => {
-    console.error('❌ Fatal error:', error);
+    console.error('❌ Fatal error during startup:', error);
     process.exit(1);
   });
 }
