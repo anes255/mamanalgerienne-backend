@@ -1,5 +1,5 @@
-models/Comment.js
-// ==========================================
+const mongoose = require('mongoose');
+
 const CommentSchema = new mongoose.Schema({
   content: {
     type: String,
@@ -30,6 +30,7 @@ const CommentSchema = new mongoose.Schema({
   timestamps: true
 });
 
+// Indexes
 CommentSchema.index({ post: 1 });
 CommentSchema.index({ author: 1 });
 CommentSchema.index({ createdAt: -1 });
