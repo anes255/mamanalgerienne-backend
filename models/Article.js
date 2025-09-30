@@ -61,7 +61,7 @@ const ArticleSchema = new mongoose.Schema({
     maxlength: [160, 'وصف الميتا لا يمكن أن يتجاوز 160 حرف']
   },
   readTime: {
-    type: Number, // in minutes
+    type: Number,
     default: 5
   }
 }, {
@@ -73,19 +73,14 @@ const ArticleSchema = new mongoose.Schema({
 // Create slug from title before saving
 ArticleSchema.pre('save', function(next) {
   if (this.isModified('title')) {
-    // Create slug from title
     this.slug = this.title
       .toLowerCase()
-      .replace(/[^\w\s-]/g, '') // Remove special characters
-      .replace(/\s+/g, '-') // Replace spaces with hyphens
-      .replace(/-+/g, '-') // Replace multiple hyphens with single hyphen
-      .trim();
-    
-    // Add timestamp to make it unique
-    this.slug = `${this.slug}-${Date.now()}`;
+      .replace(/[^\w\s-]/g, '')
+      .replace(/\s+/g, '-')
+      .replace(/-+/g, '-')
+      .trim() + '-' + Date.now();
   }
   
-  // Calculate read time (approximately 200 words per minute)
   if (this.isModified('content')) {
     const wordCount = this.content.split(/\s+/).length;
     this.readTime = Math.max(1, Math.ceil(wordCount / 200));
@@ -94,7 +89,7 @@ ArticleSchema.pre('save', function(next) {
   next();
 });
 
-// Indexes for better performance
+// Indexes
 ArticleSchema.index({ title: 'text', content: 'text', excerpt: 'text' });
 ArticleSchema.index({ category: 1 });
 ArticleSchema.index({ published: 1 });
@@ -109,7 +104,7 @@ ArticleSchema.virtual('likesCount').get(function() {
   return this.likes ? this.likes.length : 0;
 });
 
-// Instance method to check if user liked the article
+// Check if user liked the article
 ArticleSchema.methods.isLikedBy = function(userId) {
   if (!userId) return false;
   return this.likes.some(like => like.toString() === userId.toString());
