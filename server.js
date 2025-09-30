@@ -1,71 +1,48 @@
 // ==========================================
-// MAMAN ALGERIENNE - COMPLETE BACKEND SERVER
-// ROUTES FIXED - ALL ENDPOINTS WORKING
+// MAMAN ALGERIENNE - DEBUG SERVER
+// This version has extensive logging to find the problem
 // ==========================================
 
 const express = require('express');
 const mongoose = require('mongoose');
 const cors = require('cors');
-const bcrypt = require('bcryptjs');
-const jwt = require('jsonwebtoken');
 const path = require('path');
 const fs = require('fs');
 require('dotenv').config();
 
+console.log('='.repeat(60));
+console.log('🚀 STARTING MAMAN ALGERIENNE BACKEND - DEBUG MODE');
+console.log('='.repeat(60));
+
 const app = express();
 const PORT = process.env.PORT || 5000;
-const JWT_SECRET = process.env.JWT_SECRET || 'maman-algerienne-secret-key-2024';
-
-console.log('🚀 Starting Maman Algerienne Backend Server...');
-console.log('📍 Environment:', process.env.NODE_ENV || 'development');
-console.log('📍 Port:', PORT);
 
 // ==========================================
-// CREATE UPLOAD DIRECTORIES
+// MIDDLEWARE - LOAD FIRST
 // ==========================================
-const uploadDirs = [
-  './uploads',
-  './uploads/articles',
-  './uploads/products',
-  './uploads/posts',
-  './uploads/avatars'
-];
+console.log('\n📦 Loading middleware...');
 
-uploadDirs.forEach(dir => {
-  if (!fs.existsSync(dir)) {
-    fs.mkdirSync(dir, { recursive: true });
-    console.log(`✅ Created directory: ${dir}`);
-  }
-});
-
-// ==========================================
-// CORS CONFIGURATION
-// ==========================================
-const corsOptions = {
-  origin: function (origin, callback) {
-    callback(null, true); // Allow all origins for now
-  },
-  credentials: true,
-  methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization']
-};
-
-app.use(cors(corsOptions));
-
-// ==========================================
-// MIDDLEWARE
-// ==========================================
+app.use(cors({ origin: true, credentials: true }));
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
-// Serve static files from uploads
+// Create uploads directories
+const uploadDirs = ['./uploads', './uploads/articles', './uploads/products', './uploads/posts', './uploads/avatars'];
+uploadDirs.forEach(dir => {
+  if (!fs.existsSync(dir)) {
+    fs.mkdirSync(dir, { recursive: true });
+  }
+});
+
 app.use('/uploads', express.static(path.join(__dirname, './uploads')));
 
-// Request logging
+// Request logger
 app.use((req, res, next) => {
-  console.log(`${req.method} ${req.path}`);
+  console.log(`📨 ${req.method} ${req.path}`);
   next();
 });
+
+console.log('✅ Middleware loaded');
 
 // ==========================================
 // DATABASE CONNECTION
@@ -76,30 +53,15 @@ let dbConnected = false;
 
 async function connectDatabase() {
   try {
-    console.log('🔌 Connecting to MongoDB Atlas...');
-    console.log('🔗 URI:', MONGODB_URI.replace(/:[^:@]+@/, ':****@'));
-    
+    console.log('\n🔌 Connecting to MongoDB...');
     await mongoose.connect(MONGODB_URI, {
       useNewUrlParser: true,
       useUnifiedTopology: true,
-      serverSelectionTimeoutMS: 10000,
-      socketTimeoutMS: 45000,
     });
-    
     dbConnected = true;
-    console.log('✅ MongoDB connected successfully!');
-    console.log('✅ Database:', mongoose.connection.name);
-    console.log('✅ Connection state:', mongoose.connection.readyState);
-    
-    // Load models after connection
-    loadModels();
-    
-    // Create admin user
-    await createAdminUser();
-    
+    console.log('✅ MongoDB connected:', mongoose.connection.name);
   } catch (error) {
-    console.error('❌ MongoDB connection failed:', error.message);
-    console.log('⚠️  Server will continue without database');
+    console.error('❌ MongoDB failed:', error.message);
     dbConnected = false;
   }
 }
@@ -107,76 +69,61 @@ async function connectDatabase() {
 // ==========================================
 // LOAD MODELS
 // ==========================================
-function loadModels() {
-  try {
-    console.log('📦 Loading database models...');
-    
-    require('./models/User');
-    require('./models/Article');
-    require('./models/Product');
-    require('./models/Post');
-    require('./models/Comment');
-    require('./models/Order');
-    
-    console.log('✅ All models loaded successfully');
-    
-  } catch (error) {
-    console.error('❌ Error loading models:', error.message);
+async function loadModels() {
+  if (!dbConnected) {
+    console.log('⚠️  Skipping models (no database)');
+    return;
   }
-}
-
-// ==========================================
-// CREATE ADMIN USER
-// ==========================================
-async function createAdminUser() {
+  
   try {
+    console.log('\n📦 Loading models...');
+    
+    const modelFiles = ['User', 'Article', 'Product', 'Post', 'Comment', 'Order'];
+    
+    for (const model of modelFiles) {
+      try {
+        require(`./models/${model}`);
+        console.log(`  ✅ ${model} loaded`);
+      } catch (err) {
+        console.error(`  ❌ ${model} failed:`, err.message);
+      }
+    }
+    
+    console.log('✅ All models loaded');
+    
+    // Create admin
     const User = mongoose.model('User');
-    const adminEmail = 'mamanalgeriennepartenariat@gmail.com';
-    const adminPassword = 'anesaya75';
-    
-    console.log('👤 Checking for admin user...');
-    
-    const existingAdmin = await User.findOne({ email: adminEmail });
-    
-    if (!existingAdmin) {
-      const admin = new User({
+    const admin = await User.findOne({ email: 'mamanalgeriennepartenariat@gmail.com' });
+    if (!admin) {
+      const newAdmin = new User({
         name: 'مدير الموقع',
-        email: adminEmail,
+        email: 'mamanalgeriennepartenariat@gmail.com',
         phone: '0555123456',
-        password: adminPassword,
+        password: 'anesaya75',
         isAdmin: true,
         status: 'active'
       });
-      
-      await admin.save();
-      console.log('✅ Admin user created successfully!');
-      console.log('🆔 Admin ID:', admin._id);
+      await newAdmin.save();
+      console.log('✅ Admin created:', newAdmin._id);
     } else {
-      if (!existingAdmin.isAdmin) {
-        existingAdmin.isAdmin = true;
-        await existingAdmin.save();
-        console.log('✅ Existing user promoted to admin');
-      } else {
-        console.log('✅ Admin user already exists');
-      }
-      console.log('🆔 Admin ID:', existingAdmin._id);
+      console.log('✅ Admin exists:', admin._id);
     }
+    
   } catch (error) {
-    console.error('❌ Error creating admin user:', error.message);
+    console.error('❌ Models error:', error.message);
   }
 }
 
 // ==========================================
-// BASIC ROUTES - HEALTH CHECK
+// BASIC ROUTES - ALWAYS WORK
 // ==========================================
+console.log('\n🌐 Setting up basic routes...');
+
 app.get('/', (req, res) => {
   res.json({ 
     message: 'Maman Algerienne Backend API',
     status: 'Running',
-    version: '1.0.0',
-    dbStatus: dbConnected ? 'Connected' : 'Disconnected',
-    mongooseState: mongoose.connection.readyState,
-    database: mongoose.connection.name || 'Not connected'
+    dbStatus: dbConnected ? 'Connected' : 'Disconnected'
   });
 });
 
@@ -184,141 +131,151 @@ app.get('/health', (req, res) => {
   res.json({ 
     status: 'OK',
     dbStatus: dbConnected ? 'Connected' : 'Disconnected',
-    mongooseState: mongoose.connection.readyState,
-    database: mongoose.connection.name || 'Not connected',
     timestamp: new Date().toISOString()
   });
 });
 
-app.get('/api/test', (req, res) => {
-  res.json({ 
-    message: 'API is working', 
-    dbStatus: dbConnected ? 'Connected' : 'Disconnected',
-    mongooseVersion: mongoose.version
-  });
-});
+console.log('✅ Basic routes ready');
 
 // ==========================================
-// LOAD API ROUTES - CRITICAL FIX
+// LOAD API ROUTES - WITH DETAILED LOGGING
 // ==========================================
 function loadRoutes() {
-  try {
-    console.log('📋 Loading API routes...');
-    
-    // Import routes
-    const authRoutes = require('./routes/auth');
-    const articlesRoutes = require('./routes/articles');
-    const postsRoutes = require('./routes/posts');
-    const productsRoutes = require('./routes/products');
-    const commentsRoutes = require('./routes/comments');
-    const ordersRoutes = require('./routes/Orders');
-    const adminRoutes = require('./routes/admin');
-    
-    // Use routes
-    app.use('/api/auth', authRoutes);
-    app.use('/api/articles', articlesRoutes);
-    app.use('/api/posts', postsRoutes);
-    app.use('/api/products', productsRoutes);
-    app.use('/api/comments', commentsRoutes);
-    app.use('/api/orders', ordersRoutes);
-    app.use('/api/admin', adminRoutes);
-    
-    console.log('✅ All routes loaded successfully');
-    console.log('✅ Routes registered:');
-    console.log('   - /api/auth');
-    console.log('   - /api/articles');
-    console.log('   - /api/posts');
-    console.log('   - /api/products');
-    console.log('   - /api/comments');
-    console.log('   - /api/orders');
-    console.log('   - /api/admin');
-    
-  } catch (error) {
-    console.error('❌ Error loading routes:', error.message);
-    console.error('❌ Stack:', error.stack);
+  console.log('\n📋 LOADING API ROUTES...');
+  console.log('='.repeat(60));
+  
+  const routeFiles = [
+    { path: '/api/auth', file: './routes/auth' },
+    { path: '/api/articles', file: './routes/articles' },
+    { path: '/api/posts', file: './routes/posts' },
+    { path: '/api/products', file: './routes/products' },
+    { path: '/api/comments', file: './routes/comments' },
+    { path: '/api/orders', file: './routes/Orders' },
+    { path: '/api/admin', file: './routes/admin' }
+  ];
+  
+  let loadedCount = 0;
+  let failedCount = 0;
+  
+  for (const route of routeFiles) {
+    try {
+      console.log(`\n🔍 Loading: ${route.file}`);
+      
+      // Check if file exists
+      const filePath = require.resolve(route.file);
+      console.log(`  📁 File exists: ${filePath}`);
+      
+      // Try to require it
+      const router = require(route.file);
+      console.log(`  📦 Module loaded: ${typeof router}`);
+      
+      // Try to use it
+      app.use(route.path, router);
+      console.log(`  ✅ Route registered: ${route.path}`);
+      
+      loadedCount++;
+      
+    } catch (error) {
+      console.error(`  ❌ FAILED: ${route.file}`);
+      console.error(`  ❌ Error: ${error.message}`);
+      console.error(`  ❌ Stack:`, error.stack);
+      failedCount++;
+    }
+  }
+  
+  console.log('\n' + '='.repeat(60));
+  console.log(`📊 Route Loading Summary:`);
+  console.log(`   ✅ Loaded: ${loadedCount}`);
+  console.log(`   ❌ Failed: ${failedCount}`);
+  console.log('='.repeat(60));
+  
+  if (loadedCount === 0) {
+    console.log('\n⚠️  WARNING: NO ROUTES LOADED!');
+    console.log('⚠️  All API endpoints will return 404!');
+    console.log('\n🔍 Possible causes:');
+    console.log('   1. Route files do not exist in ./routes/ folder');
+    console.log('   2. Route files have syntax errors');
+    console.log('   3. Route files are missing dependencies');
+    console.log('\n🛠️  To fix:');
+    console.log('   1. Check that all route files exist');
+    console.log('   2. Check Render logs for specific error messages');
+    console.log('   3. Verify all required npm packages are installed');
   }
 }
 
 // ==========================================
-// ERROR HANDLING
+// ERROR HANDLERS - MUST BE LAST
 // ==========================================
-app.use((err, req, res, next) => {
-  console.error('Error:', err);
-  res.status(500).json({ 
-    success: false,
-    message: 'خطأ في الخادم',
-    error: process.env.NODE_ENV === 'development' ? err.message : undefined
+function setupErrorHandlers() {
+  console.log('\n⚠️  Setting up error handlers...');
+  
+  // 404 handler - catches unmatched routes
+  app.use((req, res) => {
+    console.log(`❌ 404: ${req.method} ${req.path}`);
+    res.status(404).json({ 
+      success: false,
+      message: 'المسار غير موجود',
+      path: req.path,
+      hint: 'This path does not exist. Check if routes are loaded correctly.'
+    });
   });
-});
-
-// 404 handler - MUST BE AFTER ROUTES
-app.use((req, res) => {
-  res.status(404).json({ 
-    success: false,
-    message: 'المسار غير موجود',
-    path: req.path
+  
+  // Error handler
+  app.use((err, req, res, next) => {
+    console.error('❌ Server error:', err);
+    res.status(500).json({ 
+      success: false,
+      message: 'خطأ في الخادم',
+      error: err.message
+    });
   });
-});
-
-// ==========================================
-// MONGOOSE CONNECTION EVENTS
-// ==========================================
-mongoose.connection.on('connected', () => {
-  console.log('✅ Mongoose connected to MongoDB');
-  dbConnected = true;
-});
-
-mongoose.connection.on('error', (err) => {
-  console.error('❌ Mongoose connection error:', err);
-  dbConnected = false;
-});
-
-mongoose.connection.on('disconnected', () => {
-  console.log('⚠️  Mongoose disconnected from MongoDB');
-  dbConnected = false;
-});
-
-process.on('SIGINT', async () => {
-  try {
-    await mongoose.connection.close();
-    console.log('✅ Mongoose connection closed');
-    process.exit(0);
-  } catch (err) {
-    console.error('❌ Error closing mongoose:', err);
-    process.exit(1);
-  }
-});
+  
+  console.log('✅ Error handlers ready');
+}
 
 // ==========================================
 // START SERVER
 // ==========================================
 async function startServer() {
+  console.log('\n' + '='.repeat(60));
+  console.log('🚀 STARTING SERVER SEQUENCE...');
+  console.log('='.repeat(60));
+  
   try {
-    // 1. Connect to database
+    // Step 1: Connect to database
     await connectDatabase();
     
-    // 2. Load routes - CRITICAL: Load BEFORE starting server
+    // Step 2: Load models
+    await loadModels();
+    
+    // Step 3: Load routes (CRITICAL)
     loadRoutes();
     
-    // 3. Start listening
+    // Step 4: Setup error handlers (MUST BE LAST)
+    setupErrorHandlers();
+    
+    // Step 5: Start listening
     app.listen(PORT, '0.0.0.0', () => {
-      console.log('==========================================');
-      console.log('✅ SERVER IS RUNNING');
-      console.log('✅ Server listening on port:', PORT);
-      console.log('✅ Server URL:', `http://localhost:${PORT}`);
-      console.log('✅ Health check:', `http://localhost:${PORT}/health`);
-      console.log('✅ Database status:', dbConnected ? 'Connected ✅' : 'Disconnected ⚠️');
-      if (dbConnected) {
-        console.log('✅ Database name:', mongoose.connection.name);
-      }
-      console.log('==========================================');
+      console.log('\n' + '='.repeat(60));
+      console.log('✅ SERVER IS RUNNING!');
+      console.log('='.repeat(60));
+      console.log(`🌐 URL: http://localhost:${PORT}`);
+      console.log(`🏥 Health: http://localhost:${PORT}/health`);
+      console.log(`📊 Database: ${dbConnected ? 'Connected ✅' : 'Disconnected ⚠️'}`);
+      console.log('='.repeat(60));
+      console.log('\n🔍 DEBUGGING INFO:');
+      console.log('   If you get 404 errors on /api/* endpoints:');
+      console.log('   1. Check the "Route Loading Summary" above');
+      console.log('   2. Look for "FAILED" messages');
+      console.log('   3. Check the error messages for each failed route');
+      console.log('='.repeat(60) + '\n');
     });
     
   } catch (error) {
-    console.error('❌ Failed to start server:', error);
+    console.error('\n❌ STARTUP FAILED:', error);
     process.exit(1);
   }
 }
 
-// Start the server
+// Start everything
 startServer();
