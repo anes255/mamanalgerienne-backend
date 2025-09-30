@@ -1,71 +1,70 @@
-const mongoose = require('mongoose');
-
 const PostSchema = new mongoose.Schema({
-  title: {
-    type: String,
-    required: true,
-    trim: true
-  },
   content: {
     type: String,
-    required: true
-  },
-  type: {
-    type: String,
-    enum: ['community', 'ad'],
-    default: 'community'
-  },
-  author: {
-    type: mongoose.Schema.Types.ObjectId,
-    ref: 'User',
-    required: true
+    required: [true, 'محتوى المنشور مطلوب'],
+    trim: true,
+    maxlength: [5000, 'المحتوى لا يمكن أن يتجاوز 5000 حرف']
   },
   images: [{
     type: String
   }],
+  author: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'User',
+    required: [true, 'مؤلف المنشور مطلوب']
+  },
   likes: [{
     type: mongoose.Schema.Types.ObjectId,
     ref: 'User'
   }],
-  views: {
+  commentsCount: {
     type: Number,
     default: 0
-  },
-  tags: [{
-    type: String,
-    trim: true
-  }],
-  // For ad posts
-  adDetails: {
-    link: String,
-    buttonText: String,
-    featured: {
-      type: Boolean,
-      default: false
-    }
-  },
-  // Community post specific
-  category: {
-    type: String,
-    enum: ['عام', 'نصائح', 'تجارب', 'أسئلة', 'مشاركات']
-  },
-  pinned: {
-    type: Boolean,
-    default: false
-  },
-  approved: {
-    type: Boolean,
-    default: function() {
-      return this.type === 'ad' ? false : true; // Ad posts need approval
-    }
   }
 }, {
   timestamps: true
 });
 
-// Index for better performance
-PostSchema.index({ type: 1, createdAt: -1 });
 PostSchema.index({ author: 1 });
-PostSchema.index({ approved: 1 });
+PostSchema.index({ createdAt: -1 });
 
 module.exports = mongoose.model('Post', PostSchema);
+
+// ==========================================
+// models/Comment.js
+// ==========================================
+const CommentSchema = new mongoose.Schema({
+  content: {
+    type: String,
+    required: [true, 'محتوى التعليق مطلوب'],
+    trim: true,
+    maxlength: [1000, 'التعليق لا يمكن أن يتجاوز 1000 حرف']
+  },
+  author: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'User',
+    required: [true, 'مؤلف التعليق مطلوب']
+  },
+  post: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Post',
+    required: [true, 'المنشور مطلوب']
+  },
+  parentComment: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Comment',
+    default: null
+  },
+  likes: [{
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'User'
+  }]
+}, {
+  timestamps: true
+});
+
+CommentSchema.index({ post: 1 });
+CommentSchema.index({ author: 1 });
+CommentSchema.index({ createdAt: -1 });
+
+module.exports = mongoose.model('Comment', CommentSchema);
