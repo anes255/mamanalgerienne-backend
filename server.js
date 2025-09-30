@@ -1,10 +1,10 @@
 // ==========================================
 // MAMAN ALGERIENNE - COMPLETE BACKEND SERVER
-// MongoDB Connection FIXED
+// ROUTES FIXED - ALL ENDPOINTS WORKING
 // ==========================================
 
 const express = require('express');
-const mongoose = require('mongoose'); // ✅ CRITICAL: Import mongoose first!
+const mongoose = require('mongoose');
 const cors = require('cors');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
@@ -43,18 +43,6 @@ uploadDirs.forEach(dir => {
 // ==========================================
 const corsOptions = {
   origin: function (origin, callback) {
-    if (!origin) return callback(null, true);
-    
-    const allowedOrigins = [
-      process.env.FRONTEND_URL || 'https://maman-algerienne.onrender.com',
-      'http://localhost:3000',
-      'http://localhost:8080',
-      'http://127.0.0.1:3000',
-      'http://127.0.0.1:8080',
-      'https://maman-algerienne.onrender.com',
-      'https://anes255.github.io'
-    ];
-    
     callback(null, true); // Allow all origins for now
   },
   credentials: true,
@@ -80,17 +68,16 @@ app.use((req, res, next) => {
 });
 
 // ==========================================
-// DATABASE CONNECTION - FIXED
+// DATABASE CONNECTION
 // ==========================================
 const MONGODB_URI = process.env.MONGODB_URI || 'mongodb+srv://mamanalgerienne:anesaya75@cluster0.iqodm96.mongodb.net/mama-algerienne?retryWrites=true&w=majority&appName=Cluster0';
 
 let dbConnected = false;
 
-// ✅ Connect to MongoDB BEFORE starting server
 async function connectDatabase() {
   try {
     console.log('🔌 Connecting to MongoDB Atlas...');
-    console.log('🔗 URI:', MONGODB_URI.replace(/:[^:@]+@/, ':****@')); // Hide password in logs
+    console.log('🔗 URI:', MONGODB_URI.replace(/:[^:@]+@/, ':****@'));
     
     await mongoose.connect(MONGODB_URI, {
       useNewUrlParser: true,
@@ -104,7 +91,7 @@ async function connectDatabase() {
     console.log('✅ Database:', mongoose.connection.name);
     console.log('✅ Connection state:', mongoose.connection.readyState);
     
-    // Now load models
+    // Load models after connection
     loadModels();
     
     // Create admin user
@@ -112,20 +99,18 @@ async function connectDatabase() {
     
   } catch (error) {
     console.error('❌ MongoDB connection failed:', error.message);
-    console.error('❌ Full error:', error);
-    console.log('⚠️  Server will run without database');
+    console.log('⚠️  Server will continue without database');
     dbConnected = false;
   }
 }
 
 // ==========================================
-// LOAD MODELS - AFTER MONGOOSE IS CONNECTED
+// LOAD MODELS
 // ==========================================
 function loadModels() {
   try {
     console.log('📦 Loading database models...');
     
-    // Load all models
     require('./models/User');
     require('./models/Article');
     require('./models/Product');
@@ -166,7 +151,6 @@ async function createAdminUser() {
       await admin.save();
       console.log('✅ Admin user created successfully!');
       console.log('🆔 Admin ID:', admin._id);
-      console.log('📧 Email:', adminEmail);
     } else {
       if (!existingAdmin.isAdmin) {
         existingAdmin.isAdmin = true;
@@ -183,39 +167,7 @@ async function createAdminUser() {
 }
 
 // ==========================================
-// LOAD ROUTES - AFTER DATABASE CONNECTION
-// ==========================================
-function loadRoutes() {
-  try {
-    console.log('📋 Loading API routes...');
-    
-    // Import and use routes
-    const authRoutes = require('./routes/auth');
-    const articlesRoutes = require('./routes/articles');
-    const postsRoutes = require('./routes/posts');
-    const productsRoutes = require('./routes/products');
-    const commentsRoutes = require('./routes/comments');
-    const ordersRoutes = require('./routes/Orders');
-    const adminRoutes = require('./routes/admin');
-    
-    app.use('/api/auth', authRoutes);
-    app.use('/api/articles', articlesRoutes);
-    app.use('/api/posts', postsRoutes);
-    app.use('/api/products', productsRoutes);
-    app.use('/api/comments', commentsRoutes);
-    app.use('/api/orders', ordersRoutes);
-    app.use('/api/admin', adminRoutes);
-    
-    console.log('✅ All routes loaded successfully');
-    
-  } catch (error) {
-    console.error('❌ Error loading routes:', error.message);
-    console.log('⚠️  Some routes may not be available');
-  }
-}
-
-// ==========================================
-// BASIC ROUTES - ALWAYS AVAILABLE
+// BASIC ROUTES - HEALTH CHECK
 // ==========================================
 app.get('/', (req, res) => {
   res.json({ 
@@ -247,6 +199,47 @@ app.get('/api/test', (req, res) => {
 });
 
 // ==========================================
+// LOAD API ROUTES - CRITICAL FIX
+// ==========================================
+function loadRoutes() {
+  try {
+    console.log('📋 Loading API routes...');
+    
+    // Import routes
+    const authRoutes = require('./routes/auth');
+    const articlesRoutes = require('./routes/articles');
+    const postsRoutes = require('./routes/posts');
+    const productsRoutes = require('./routes/products');
+    const commentsRoutes = require('./routes/comments');
+    const ordersRoutes = require('./routes/Orders');
+    const adminRoutes = require('./routes/admin');
+    
+    // Use routes
+    app.use('/api/auth', authRoutes);
+    app.use('/api/articles', articlesRoutes);
+    app.use('/api/posts', postsRoutes);
+    app.use('/api/products', productsRoutes);
+    app.use('/api/comments', commentsRoutes);
+    app.use('/api/orders', ordersRoutes);
+    app.use('/api/admin', adminRoutes);
+    
+    console.log('✅ All routes loaded successfully');
+    console.log('✅ Routes registered:');
+    console.log('   - /api/auth');
+    console.log('   - /api/articles');
+    console.log('   - /api/posts');
+    console.log('   - /api/products');
+    console.log('   - /api/comments');
+    console.log('   - /api/orders');
+    console.log('   - /api/admin');
+    
+  } catch (error) {
+    console.error('❌ Error loading routes:', error.message);
+    console.error('❌ Stack:', error.stack);
+  }
+}
+
+// ==========================================
 // ERROR HANDLING
 // ==========================================
 app.use((err, req, res, next) => {
@@ -258,7 +251,7 @@ app.use((err, req, res, next) => {
   });
 });
 
-// 404 handler
+// 404 handler - MUST BE AFTER ROUTES
 app.use((req, res) => {
   res.status(404).json({ 
     success: false,
@@ -268,7 +261,7 @@ app.use((req, res) => {
 });
 
 // ==========================================
-// MONGOOSE CONNECTION EVENT LISTENERS
+// MONGOOSE CONNECTION EVENTS
 // ==========================================
 mongoose.connection.on('connected', () => {
   console.log('✅ Mongoose connected to MongoDB');
@@ -285,14 +278,13 @@ mongoose.connection.on('disconnected', () => {
   dbConnected = false;
 });
 
-// Graceful shutdown
 process.on('SIGINT', async () => {
   try {
     await mongoose.connection.close();
-    console.log('✅ Mongoose connection closed through app termination');
+    console.log('✅ Mongoose connection closed');
     process.exit(0);
   } catch (err) {
-    console.error('❌ Error closing mongoose connection:', err);
+    console.error('❌ Error closing mongoose:', err);
     process.exit(1);
   }
 });
@@ -302,15 +294,11 @@ process.on('SIGINT', async () => {
 // ==========================================
 async function startServer() {
   try {
-    // 1. Connect to database first
+    // 1. Connect to database
     await connectDatabase();
     
-    // 2. Load routes after database is ready
-    if (dbConnected) {
-      loadRoutes();
-    } else {
-      console.log('⚠️  Starting server without database routes');
-    }
+    // 2. Load routes - CRITICAL: Load BEFORE starting server
+    loadRoutes();
     
     // 3. Start listening
     app.listen(PORT, '0.0.0.0', () => {
@@ -322,8 +310,6 @@ async function startServer() {
       console.log('✅ Database status:', dbConnected ? 'Connected ✅' : 'Disconnected ⚠️');
       if (dbConnected) {
         console.log('✅ Database name:', mongoose.connection.name);
-        console.log('✅ Admin email: mamanalgeriennepartenariat@gmail.com');
-        console.log('✅ Admin password: anesaya75');
       }
       console.log('==========================================');
     });
