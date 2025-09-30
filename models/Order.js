@@ -1,3 +1,5 @@
+const mongoose = require('mongoose');
+
 const OrderSchema = new mongoose.Schema({
   user: {
     type: mongoose.Schema.Types.ObjectId,
@@ -64,6 +66,7 @@ const OrderSchema = new mongoose.Schema({
   timestamps: true
 });
 
+// Indexes
 OrderSchema.index({ user: 1 });
 OrderSchema.index({ status: 1 });
 OrderSchema.index({ createdAt: -1 });
