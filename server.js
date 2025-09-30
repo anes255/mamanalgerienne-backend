@@ -1,9 +1,10 @@
 // ==========================================
 // MAMAN ALGERIENNE - COMPLETE BACKEND SERVER
+// MongoDB Connection FIXED
 // ==========================================
 
 const express = require('express');
-const mongoose = require('mongoose');
+const mongoose = require('mongoose'); // ✅ CRITICAL: Import mongoose first!
 const cors = require('cors');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
@@ -54,11 +55,7 @@ const corsOptions = {
       'https://anes255.github.io'
     ];
     
-    if (allowedOrigins.indexOf(origin) !== -1 || !origin) {
-      callback(null, true);
-    } else {
-      callback(null, true); // Allow all in development
-    }
+    callback(null, true); // Allow all origins for now
   },
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
@@ -83,27 +80,52 @@ app.use((req, res, next) => {
 });
 
 // ==========================================
-// DATABASE CONNECTION
+// DATABASE CONNECTION - FIXED
 // ==========================================
 const MONGODB_URI = process.env.MONGODB_URI || 'mongodb+srv://mamanalgerienne:anesaya75@cluster0.iqodm96.mongodb.net/mama-algerienne?retryWrites=true&w=majority&appName=Cluster0';
 
 let dbConnected = false;
 
+// ✅ Connect to MongoDB BEFORE starting server
 async function connectDatabase() {
   try {
     console.log('🔌 Connecting to MongoDB Atlas...');
+    console.log('🔗 URI:', MONGODB_URI.replace(/:[^:@]+@/, ':****@')); // Hide password in logs
     
     await mongoose.connect(MONGODB_URI, {
       useNewUrlParser: true,
       useUnifiedTopology: true,
-      serverSelectionTimeoutMS: 5000
+      serverSelectionTimeoutMS: 10000,
+      socketTimeoutMS: 45000,
     });
     
     dbConnected = true;
     console.log('✅ MongoDB connected successfully!');
     console.log('✅ Database:', mongoose.connection.name);
+    console.log('✅ Connection state:', mongoose.connection.readyState);
     
-    // Import models after connection
+    // Now load models
+    loadModels();
+    
+    // Create admin user
+    await createAdminUser();
+    
+  } catch (error) {
+    console.error('❌ MongoDB connection failed:', error.message);
+    console.error('❌ Full error:', error);
+    console.log('⚠️  Server will run without database');
+    dbConnected = false;
+  }
+}
+
+// ==========================================
+// LOAD MODELS - AFTER MONGOOSE IS CONNECTED
+// ==========================================
+function loadModels() {
+  try {
+    console.log('📦 Loading database models...');
+    
+    // Load all models
     require('./models/User');
     require('./models/Article');
     require('./models/Product');
@@ -111,15 +133,10 @@ async function connectDatabase() {
     require('./models/Comment');
     require('./models/Order');
     
-    // Create admin user after connection
-    await createAdminUser();
-    
-    console.log('✅ All models loaded');
+    console.log('✅ All models loaded successfully');
     
   } catch (error) {
-    console.error('❌ MongoDB connection failed:', error.message);
-    console.log('⚠️  Server will run without database');
-    dbConnected = false;
+    console.error('❌ Error loading models:', error.message);
   }
 }
 
@@ -132,6 +149,8 @@ async function createAdminUser() {
     const adminEmail = 'mamanalgeriennepartenariat@gmail.com';
     const adminPassword = 'anesaya75';
     
+    console.log('👤 Checking for admin user...');
+    
     const existingAdmin = await User.findOne({ email: adminEmail });
     
     if (!existingAdmin) {
@@ -140,12 +159,14 @@ async function createAdminUser() {
         email: adminEmail,
         phone: '0555123456',
         password: adminPassword,
-        isAdmin: true
+        isAdmin: true,
+        status: 'active'
       });
       
       await admin.save();
       console.log('✅ Admin user created successfully!');
       console.log('🆔 Admin ID:', admin._id);
+      console.log('📧 Email:', adminEmail);
     } else {
       if (!existingAdmin.isAdmin) {
         existingAdmin.isAdmin = true;
@@ -153,8 +174,8 @@ async function createAdminUser() {
         console.log('✅ Existing user promoted to admin');
       } else {
         console.log('✅ Admin user already exists');
-        console.log('🆔 Admin ID:', existingAdmin._id);
       }
+      console.log('🆔 Admin ID:', existingAdmin._id);
     }
   } catch (error) {
     console.error('❌ Error creating admin user:', error.message);
@@ -162,13 +183,48 @@ async function createAdminUser() {
 }
 
 // ==========================================
-// ROUTES - HEALTH CHECK
+// LOAD ROUTES - AFTER DATABASE CONNECTION
+// ==========================================
+function loadRoutes() {
+  try {
+    console.log('📋 Loading API routes...');
+    
+    // Import and use routes
+    const authRoutes = require('./routes/auth');
+    const articlesRoutes = require('./routes/articles');
+    const postsRoutes = require('./routes/posts');
+    const productsRoutes = require('./routes/products');
+    const commentsRoutes = require('./routes/comments');
+    const ordersRoutes = require('./routes/Orders');
+    const adminRoutes = require('./routes/admin');
+    
+    app.use('/api/auth', authRoutes);
+    app.use('/api/articles', articlesRoutes);
+    app.use('/api/posts', postsRoutes);
+    app.use('/api/products', productsRoutes);
+    app.use('/api/comments', commentsRoutes);
+    app.use('/api/orders', ordersRoutes);
+    app.use('/api/admin', adminRoutes);
+    
+    console.log('✅ All routes loaded successfully');
+    
+  } catch (error) {
+    console.error('❌ Error loading routes:', error.message);
+    console.log('⚠️  Some routes may not be available');
+  }
+}
+
+// ==========================================
+// BASIC ROUTES - ALWAYS AVAILABLE
 // ==========================================
 app.get('/', (req, res) => {
   res.json({ 
     message: 'Maman Algerienne Backend API',
     status: 'Running',
-    dbStatus: dbConnected ? 'Connected' : 'Disconnected'
+    version: '1.0.0',
+    dbStatus: dbConnected ? 'Connected' : 'Disconnected',
+    mongooseState: mongoose.connection.readyState,
+    database: mongoose.connection.name || 'Not connected'
   });
 });
 
@@ -176,43 +232,18 @@ app.get('/health', (req, res) => {
   res.json({ 
     status: 'OK',
     dbStatus: dbConnected ? 'Connected' : 'Disconnected',
+    mongooseState: mongoose.connection.readyState,
+    database: mongoose.connection.name || 'Not connected',
     timestamp: new Date().toISOString()
   });
 });
 
 app.get('/api/test', (req, res) => {
-  res.json({ message: 'API is working', dbStatus: dbConnected ? 'Connected' : 'Disconnected' });
-});
-
-// ==========================================
-// LOAD ROUTES
-// ==========================================
-connectDatabase().then(() => {
-  if (dbConnected) {
-    try {
-      // Import and use routes
-      const authRoutes = require('./routes/auth');
-      const articlesRoutes = require('./routes/articles');
-      const postsRoutes = require('./routes/posts');
-      const productsRoutes = require('./routes/products');
-      const commentsRoutes = require('./routes/comments');
-      const ordersRoutes = require('./routes/Orders');
-      const adminRoutes = require('./routes/admin');
-      
-      app.use('/api/auth', authRoutes);
-      app.use('/api/articles', articlesRoutes);
-      app.use('/api/posts', postsRoutes);
-      app.use('/api/products', productsRoutes);
-      app.use('/api/comments', commentsRoutes);
-      app.use('/api/orders', ordersRoutes);
-      app.use('/api/admin', adminRoutes);
-      
-      console.log('✅ All routes loaded successfully');
-    } catch (error) {
-      console.error('❌ Error loading routes:', error.message);
-      console.log('⚠️  Some routes may not be available');
-    }
-  }
+  res.json({ 
+    message: 'API is working', 
+    dbStatus: dbConnected ? 'Connected' : 'Disconnected',
+    mongooseVersion: mongoose.version
+  });
 });
 
 // ==========================================
@@ -237,14 +268,71 @@ app.use((req, res) => {
 });
 
 // ==========================================
+// MONGOOSE CONNECTION EVENT LISTENERS
+// ==========================================
+mongoose.connection.on('connected', () => {
+  console.log('✅ Mongoose connected to MongoDB');
+  dbConnected = true;
+});
+
+mongoose.connection.on('error', (err) => {
+  console.error('❌ Mongoose connection error:', err);
+  dbConnected = false;
+});
+
+mongoose.connection.on('disconnected', () => {
+  console.log('⚠️  Mongoose disconnected from MongoDB');
+  dbConnected = false;
+});
+
+// Graceful shutdown
+process.on('SIGINT', async () => {
+  try {
+    await mongoose.connection.close();
+    console.log('✅ Mongoose connection closed through app termination');
+    process.exit(0);
+  } catch (err) {
+    console.error('❌ Error closing mongoose connection:', err);
+    process.exit(1);
+  }
+});
+
+// ==========================================
 // START SERVER
 // ==========================================
-app.listen(PORT, '0.0.0.0', () => {
-  console.log('==========================================');
-  console.log('✅ SERVER IS RUNNING');
-  console.log('✅ Server listening on port:', PORT);
-  console.log('✅ Server URL:', `http://localhost:${PORT}`);
-  console.log('✅ Health check:', `http://localhost:${PORT}/health`);
-  console.log('✅ Database status:', dbConnected ? 'Connected' : 'Starting...');
-  console.log('==========================================');
-});
+async function startServer() {
+  try {
+    // 1. Connect to database first
+    await connectDatabase();
+    
+    // 2. Load routes after database is ready
+    if (dbConnected) {
+      loadRoutes();
+    } else {
+      console.log('⚠️  Starting server without database routes');
+    }
+    
+    // 3. Start listening
+    app.listen(PORT, '0.0.0.0', () => {
+      console.log('==========================================');
+      console.log('✅ SERVER IS RUNNING');
+      console.log('✅ Server listening on port:', PORT);
+      console.log('✅ Server URL:', `http://localhost:${PORT}`);
+      console.log('✅ Health check:', `http://localhost:${PORT}/health`);
+      console.log('✅ Database status:', dbConnected ? 'Connected ✅' : 'Disconnected ⚠️');
+      if (dbConnected) {
+        console.log('✅ Database name:', mongoose.connection.name);
+        console.log('✅ Admin email: mamanalgeriennepartenariat@gmail.com');
+        console.log('✅ Admin password: anesaya75');
+      }
+      console.log('==========================================');
+    });
+    
+  } catch (error) {
+    console.error('❌ Failed to start server:', error);
+    process.exit(1);
+  }
+}
+
+// Start the server
+startServer();
