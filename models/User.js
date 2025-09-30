@@ -20,8 +20,7 @@ const UserSchema = new mongoose.Schema({
   phone: {
     type: String,
     required: [true, 'رقم الهاتف مطلوب'],
-    trim: true,
-    match: [/^[0-9]{10}$/, 'رقم الهاتف يجب أن يكون 10 أرقام']
+    trim: true
   },
   password: {
     type: String,
@@ -134,6 +133,8 @@ const UserSchema = new mongoose.Schema({
       delete ret.resetPasswordExpires;
       delete ret.emailVerificationToken;
       delete ret.emailVerificationExpires;
+      delete ret.loginAttempts;
+      delete ret.lockedUntil;
       return ret;
     }
   }
