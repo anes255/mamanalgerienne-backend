@@ -72,28 +72,13 @@ const UserSchema = new mongoose.Schema({
   },
   preferences: {
     notifications: {
-      email: {
-        type: Boolean,
-        default: true
-      },
-      push: {
-        type: Boolean,
-        default: true
-      },
-      comments: {
-        type: Boolean,
-        default: true
-      }
+      email: { type: Boolean, default: true },
+      push: { type: Boolean, default: true },
+      comments: { type: Boolean, default: true }
     },
     privacy: {
-      showEmail: {
-        type: Boolean,
-        default: false
-      },
-      showPhone: {
-        type: Boolean,
-        default: false
-      },
+      showEmail: { type: Boolean, default: false },
+      showPhone: { type: Boolean, default: false },
       profileVisibility: {
         type: String,
         enum: ['public', 'friends', 'private'],
@@ -102,18 +87,9 @@ const UserSchema = new mongoose.Schema({
     }
   },
   stats: {
-    postsCount: {
-      type: Number,
-      default: 0
-    },
-    commentsCount: {
-      type: Number,
-      default: 0
-    },
-    likesReceived: {
-      type: Number,
-      default: 0
-    }
+    postsCount: { type: Number, default: 0 },
+    commentsCount: { type: Number, default: 0 },
+    likesReceived: { type: Number, default: 0 }
   },
   socialMedia: {
     facebook: String,
@@ -140,7 +116,7 @@ const UserSchema = new mongoose.Schema({
   }
 });
 
-// Indexes for better performance
+// Indexes
 UserSchema.index({ email: 1 });
 UserSchema.index({ phone: 1 });
 UserSchema.index({ isAdmin: 1 });
@@ -151,7 +127,6 @@ UserSchema.index({ lastLogin: -1 });
 // Hash password before saving
 UserSchema.pre('save', async function(next) {
   if (!this.isModified('password')) return next();
-  
   try {
     const salt = await bcrypt.genSalt(12);
     this.password = await bcrypt.hash(this.password, salt);
@@ -170,7 +145,7 @@ UserSchema.methods.comparePassword = async function(candidatePassword) {
   }
 };
 
-// Get public profile (without sensitive data)
+// Get public profile
 UserSchema.methods.getPublicProfile = function() {
   return {
     _id: this._id,
@@ -184,7 +159,7 @@ UserSchema.methods.getPublicProfile = function() {
   };
 };
 
-// Static method to find by email
+// Find by email
 UserSchema.statics.findByEmail = function(email) {
   return this.findOne({ email: email.toLowerCase() });
 };
@@ -196,22 +171,16 @@ UserSchema.methods.isLocked = function() {
 
 // Increment login attempts
 UserSchema.methods.incLoginAttempts = function() {
-  // If we have a previous lock that has expired, restart at 1
   if (this.lockedUntil && this.lockedUntil < Date.now()) {
     return this.updateOne({
       $set: { loginAttempts: 1 },
       $unset: { lockedUntil: 1 }
     });
   }
-  
-  // Otherwise, increment
   const updates = { $inc: { loginAttempts: 1 } };
-  
-  // Lock the account if we've reached max attempts (5)
   if (this.loginAttempts + 1 >= 5 && !this.isLocked()) {
-    updates.$set = { lockedUntil: Date.now() + 2 * 60 * 60 * 1000 }; // Lock for 2 hours
+    updates.$set = { lockedUntil: Date.now() + 2 * 60 * 60 * 1000 };
   }
-  
   return this.updateOne(updates);
 };
 
