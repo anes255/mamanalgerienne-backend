@@ -1,5 +1,3 @@
-// models/Product.js
-// ==========================================
 const mongoose = require('mongoose');
 
 const ProductSchema = new mongoose.Schema({
@@ -46,9 +44,11 @@ const ProductSchema = new mongoose.Schema({
   timestamps: true
 });
 
+// Indexes
 ProductSchema.index({ name: 'text', description: 'text' });
 ProductSchema.index({ category: 1 });
 ProductSchema.index({ inStock: 1 });
 ProductSchema.index({ featured: 1 });
+ProductSchema.index({ createdAt: -1 });
 
 module.exports = mongoose.model('Product', ProductSchema);
