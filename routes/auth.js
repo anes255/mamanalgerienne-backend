@@ -1,18 +1,21 @@
 const express = require('express');
+const router = express.Router();
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
-const User = require('../models/User');
+const mongoose = require('mongoose');
 const { auth } = require('../middleware/auth');
 
-const router = express.Router();
-
-// JWT Secret
 const JWT_SECRET = process.env.JWT_SECRET || 'maman-algerienne-secret-key-2024';
 
-// Register
+// ==========================================
+// REGISTER - Create new user account
+// ==========================================
 router.post('/register', async (req, res) => {
   try {
+    const User = mongoose.model('User');
     const { name, email, phone, password, confirmPassword } = req.body;
+
+    console.log('📝 Registration attempt for:', email);
 
     // Validation
     if (!name || !email || !phone || !password) {
@@ -50,13 +53,14 @@ router.post('/register', async (req, res) => {
 
     // Create user
     const user = new User({
-      name,
-      email,
-      phone,
+      name: name.trim(),
+      email: email.toLowerCase().trim(),
+      phone: phone.trim(),
       password // Will be hashed by the pre-save middleware
     });
 
     await user.save();
+    console.log('✅ User registered:', user.email, 'ID:', user._id);
 
     // Create token
     const token = jwt.sign(
@@ -71,7 +75,6 @@ router.post('/register', async (req, res) => {
       token,
       user: {
         id: user._id,
-        _id: user._id,
         name: user.name,
         email: user.email,
         phone: user.phone,
@@ -81,22 +84,25 @@ router.post('/register', async (req, res) => {
     });
 
   } catch (error) {
-    console.error('Register error:', error);
+    console.error('❌ Register error:', error);
     res.status(500).json({
       success: false,
-      message: 'خطأ في الخادم'
+      message: 'خطأ في الخادم',
+      error: error.message
     });
   }
 });
 
-// Login - FIXED VERSION
+// ==========================================
+// LOGIN - Authenticate user
+// ==========================================
 router.post('/login', async (req, res) => {
   try {
-    console.log('🔑 Login request body:', req.body);
-    
-    // Extract email/username and password - handle both field names
+    const User = mongoose.model('User');
     const { email, username, password } = req.body;
     const loginField = email || username;
+
+    console.log('🔑 Login attempt for:', loginField);
 
     // Validation
     if (!loginField || !password) {
@@ -106,13 +112,11 @@ router.post('/login', async (req, res) => {
       });
     }
 
-    console.log('🔍 Looking for user with:', loginField);
-
     // Find user by email or phone
     const user = await User.findOne({
       $or: [
-        { email: loginField },
-        { phone: loginField }
+        { email: loginField.toLowerCase().trim() },
+        { phone: loginField.trim() }
       ]
     });
 
@@ -126,36 +130,63 @@ router.post('/login', async (req, res) => {
 
     console.log('✅ User found:', user.email, 'ID:', user._id);
 
+    // Check if account is locked
+    if (user.isLocked()) {
+      return res.status(403).json({
+        success: false,
+        message: 'تم قفل الحساب مؤقتاً بسبب محاولات تسجيل دخول فاشلة متعددة'
+      });
+    }
+
     // Check password
     const isMatch = await bcrypt.compare(password, user.password);
 
     if (!isMatch) {
       console.log('❌ Password mismatch');
+      
+      // Increment login attempts
+      await user.incLoginAttempts();
+      
       return res.status(400).json({
         success: false,
         message: 'بيانات الدخول غير صحيحة'
       });
     }
 
+    // Check account status
+    if (user.status !== 'active') {
+      return res.status(403).json({
+        success: false,
+        message: 'تم تعليق هذا الحساب'
+      });
+    }
+
     console.log('✅ Password matches');
 
-    // Create token with proper user ID
+    // Reset login attempts on successful login
+    if (user.loginAttempts > 0) {
+      await user.resetLoginAttempts();
+    }
+
+    // Update last login
+    user.lastLogin = new Date();
+    await user.save();
+
+    // Create token
     const token = jwt.sign(
       { userId: user._id },
       JWT_SECRET,
       { expiresIn: '30d' }
     );
 
-    console.log('✅ Login successful for:', user.email, 'Token generated');
+    console.log('✅ Login successful for:', user.email);
 
-    // Return user data with both id and _id for compatibility
     res.json({
       success: true,
       message: 'تم تسجيل الدخول بنجاح',
       token,
       user: {
         id: user._id,
-        _id: user._id,
         name: user.name,
         email: user.email,
         phone: user.phone,
@@ -174,29 +205,23 @@ router.post('/login', async (req, res) => {
   }
 });
 
-// Get current user - FIXED to use req.user instead of req.userId
+// ==========================================
+// GET CURRENT USER
+// ==========================================
 router.get('/me', auth, async (req, res) => {
   try {
-    // req.user is set by the auth middleware
-    const user = await User.findById(req.user._id).select('-password');
-    
-    if (!user) {
-      return res.status(404).json({
-        success: false,
-        message: 'المستخدم غير موجود'
-      });
-    }
-
     res.json({
       success: true,
       user: {
-        id: user._id,
-        _id: user._id,
-        name: user.name,
-        email: user.email,
-        phone: user.phone,
-        isAdmin: user.isAdmin,
-        avatar: user.avatar
+        id: req.user._id,
+        name: req.user.name,
+        email: req.user.email,
+        phone: req.user.phone,
+        isAdmin: req.user.isAdmin,
+        avatar: req.user.avatar,
+        bio: req.user.bio,
+        location: req.user.location,
+        stats: req.user.stats
       }
     });
   } catch (error) {
@@ -208,12 +233,15 @@ router.get('/me', auth, async (req, res) => {
   }
 });
 
-// Update profile - FIXED to use req.user instead of req.userId
+// ==========================================
+// UPDATE PROFILE
+// ==========================================
 router.put('/profile', auth, async (req, res) => {
   try {
-    const { name, phone } = req.body;
+    const User = mongoose.model('User');
+    const { name, phone, bio, location } = req.body;
 
-    const user = await User.findById(req.user._id);
+    const user = await User.findById(req.userId);
     
     if (!user) {
       return res.status(404).json({
@@ -223,8 +251,10 @@ router.put('/profile', auth, async (req, res) => {
     }
 
     // Update fields
-    if (name) user.name = name;
-    if (phone) user.phone = phone;
+    if (name) user.name = name.trim();
+    if (phone) user.phone = phone.trim();
+    if (bio !== undefined) user.bio = bio.trim();
+    if (location !== undefined) user.location = location.trim();
 
     await user.save();
 
@@ -233,12 +263,13 @@ router.put('/profile', auth, async (req, res) => {
       message: 'تم تحديث الملف الشخصي بنجاح',
       user: {
         id: user._id,
-        _id: user._id,
         name: user.name,
         email: user.email,
         phone: user.phone,
         isAdmin: user.isAdmin,
-        avatar: user.avatar
+        avatar: user.avatar,
+        bio: user.bio,
+        location: user.location
       }
     });
 
@@ -251,9 +282,12 @@ router.put('/profile', auth, async (req, res) => {
   }
 });
 
-// Change password - FIXED to use req.user instead of req.userId
+// ==========================================
+// CHANGE PASSWORD
+// ==========================================
 router.put('/password', auth, async (req, res) => {
   try {
+    const User = mongoose.model('User');
     const { currentPassword, newPassword, confirmPassword } = req.body;
 
     if (!currentPassword || !newPassword || !confirmPassword) {
@@ -277,7 +311,7 @@ router.put('/password', auth, async (req, res) => {
       });
     }
 
-    const user = await User.findById(req.user._id);
+    const user = await User.findById(req.userId);
     
     if (!user) {
       return res.status(404).json({
@@ -296,8 +330,8 @@ router.put('/password', auth, async (req, res) => {
       });
     }
 
-    // Update password
-    user.password = newPassword; // Will be hashed by pre-save middleware
+    // Update password (will be hashed by pre-save middleware)
+    user.password = newPassword;
     await user.save();
 
     res.json({
@@ -307,22 +341,6 @@ router.put('/password', auth, async (req, res) => {
 
   } catch (error) {
     console.error('Change password error:', error);
-    res.status(500).json({
-      success: false,
-      message: 'خطأ في الخادم'
-    });
-  }
-});
-
-// Logout (client-side token removal, but endpoint for consistency)
-router.post('/logout', auth, async (req, res) => {
-  try {
-    res.json({
-      success: true,
-      message: 'تم تسجيل الخروج بنجاح'
-    });
-  } catch (error) {
-    console.error('Logout error:', error);
     res.status(500).json({
       success: false,
       message: 'خطأ في الخادم'
